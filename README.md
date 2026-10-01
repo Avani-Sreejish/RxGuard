@@ -51,7 +51,7 @@ docker run -d --name rxguard-mysql-dev -e MYSQL_ROOT_PASSWORD=devroot -e MYSQL_D
   -e MYSQL_USER=rxguard -e MYSQL_PASSWORD=devpass -p 3307:3306 mysql:8.4
 source scripts/dev.env                       # dev-only settings (DEBUG on, demo password, demo toggles)
 cd backend && ../.venv/Scripts/python manage.py migrate && ../.venv/Scripts/python manage.py seed
-../.venv/Scripts/python manage.py runserver  # API on :8000
+../.venv/Scripts/python manage.py runserver 8001  # API on :8001 (the Vite dev proxy targets this port)
 cd ../frontend && npm install && npm run dev # UI on :5173 (proxies /api)
 ```
 

@@ -51,6 +51,7 @@ def test_bm25_ranks_keyword_match_first(corpus):
 def _fake_dense(monkeypatch, scores: dict[int, float]):
     """Dense search returns `scores` best-first; dense_scores() serves rows the dense ranking did not return."""
     ranked = sorted(scores.items(), key=lambda x: -x[1])
+    monkeypatch.setattr(retrieval, "load_index", lambda kb_label: (None, {}))
     monkeypatch.setattr(retrieval, "embed", lambda texts, kind: [[0.0]] * len(texts))
     monkeypatch.setattr(retrieval, "search", lambda kb_label, q, k, allowed=None, query_vector=None: [
         (r, s) for r, s in ranked if allowed is None or r in allowed][:k])
@@ -225,3 +226,30 @@ def test_gemini_missing_key_is_template_mode_not_crash(settings, monkeypatch, ct
     with pytest.raises(llm_gateway.LlmUnavailable, match="GEMINI_API_KEY"):
         llm_gateway.call_structured("normalize", PROMPT, "choose", NormalizationChoice, llm_gateway.Budget(),
                                     validation_context={"offered_ids": []})
+
+
+def test_model_without_key_is_skipped_not_counted(gemini, settings, monkeypatch, ctx):
+    """Gemini primary with a key, Claude fallback without one: the missing key must not use the call budget
+    or be logged as an LLM call."""
+    from api.models import LlmCall
+
+    settings.RXGUARD = {**settings.RXGUARD, "LLM_PRIMARY_MODEL": "gemini-3.5-flash-lite",
+                        "LLM_FALLBACK_MODEL": "claude-haiku-4-5"}
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from google.genai import errors
+    gemini([errors.ServerError(503, {"error": {"code": 503, "message": "unavailable", "status": "UNAVAILABLE"}})])
+    budget = llm_gateway.Budget()
+    with pytest.raises(llm_gateway.LlmUnavailable):
+        llm_gateway.call_structured("normalize", PROMPT, "choose", NormalizationChoice, budget,
+                                    validation_context={"offered_ids": [1]})
+    assert budget.calls == 1
+    assert not LlmCall.objects.filter(model="claude-haiku-4-5").exists()
+
+
+def test_hybrid_does_not_embed_when_index_is_missing(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("embedding model must not load when the index is unavailable")
+
+    monkeypatch.setattr(retrieval, "embed", boom)
+    with pytest.raises(retrieval.IndexUnavailable):
+        retrieval.hybrid_search("no-such-kb", "warfarin", 3)

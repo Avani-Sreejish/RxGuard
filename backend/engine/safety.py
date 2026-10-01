@@ -122,7 +122,7 @@ _SCOPE = [re.compile(p, re.I) for p in (
     r"\b\d+(\.\d+)?\s?(mg|mcg|µg|g|ml|iu|units?)\b", r"\b(stop|switch|discontinue|withhold|replace|substitute)\w*\b",
     r"\bsafe to (dispense|give|use|take)\b", r"\b(is|are) safe\b", r"\bno (risk|interaction)s?\b",
     r"\b(increase|decrease|reduce|adjust|titrate)\w* (the )?dose\b", r"\b(recommend|should (take|use|start|receive))\b",
-    r"\b(dose|dosage|dosing)\b", r"\bprescribe\w*\b", r"\bdiagnos\w*\b",
+    r"\b(dose|dosage|dosing)\b(?!\s+forms?\b)", r"\bprescribe\w*\b", r"\bdiagnos\w*\b",
 )]
 
 

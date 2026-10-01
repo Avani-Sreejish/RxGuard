@@ -176,7 +176,7 @@ class Runner:
             f = next(x for x in b["findings"] if x["ordinal"] == n)
             used = [t for t in a["tool_trace"] if t["tool"] == "get_finding"]
             ok = any(t["args"].get("finding_ordinal") == n for t in used)
-            self.record(cid, "A", ok and f["severity"] in a["answer"], detail=f"trace={used} answer={a['answer'][:160]}")
+            self.record(cid, "A", ok and f["severity"].lower() in a["answer"].lower(), detail=f"trace={used} answer={a['answer'][:160]}")
             self.score_displayed_claims(cid, a.get("claims", []), source="ask")
         if "gold_chunks" in case:
             self.score_guideline(case, a)
@@ -393,7 +393,7 @@ def summarize(runner: Runner) -> dict:
                                 status_code__lt=400).values_list("correlation_id", flat=True)]
     costs = [per.get(c, 0.0) for c in q]
     s["I"] = {"queries": len(q), "mean_usd": round(statistics.mean(costs), 6) if costs else None,
-              "p95_usd": pct(costs, 95), "zero_token_share": round(sum(1 for c in q if c not in per) / len(q), 3) if q else None,
+              "p95_usd": pct(costs, 95), "zero_token_share": round(sum(1 for c in q if tok.get(c, 0) == 0) / len(q), 3) if q else None,
               "real_llm_calls": calls.exclude(model="(simulated)").exclude(status="api_error").count(),
               "mean_tokens": round(statistics.mean(tok.get(c, 0) for c in q), 1) if q else None,
               "unpriced_models": sorted(m for m in used_models if m not in priced)}
