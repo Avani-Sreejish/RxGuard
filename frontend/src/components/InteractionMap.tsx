@@ -77,6 +77,34 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
           </filter>
         </defs>
 
+        {/* Clear State indicator when 0 interactions exist */}
+        {rx.findings.length === 0 && (
+          <g>
+            <rect
+              x={W / 2 - 140}
+              y={H / 2 - 16}
+              width={280}
+              height={32}
+              rx={16}
+              fill="var(--surface)"
+              stroke="var(--p3)"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              style={{ filter: "var(--shadow-sm)" }}
+            />
+            <text
+              x={W / 2}
+              y={H / 2 + 4}
+              textAnchor="middle"
+              fontSize={11}
+              fill="var(--text)"
+              fontWeight={700}
+            >
+              ✓ 0 DDInter interactions detected (Clear)
+            </text>
+          </g>
+        )}
+
         {/* Interaction Lines / Chords */}
         {rx.findings.map((f) => {
           const posA = pos.get(`d${f.drug_a_id}`);

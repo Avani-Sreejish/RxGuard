@@ -21,11 +21,11 @@ const CLINICAL_PRESETS = [
     note: "Atrial fibrillation post-CABG. Check dual anticoagulant/antiplatelet safety.",
   },
   {
-    title: "⚡ Ciprofloxacin + Amiodarone (QT Risk)",
+    title: "⚡ Amiodarone + Fluconazole + Warfarin (Severe Polypharmacy)",
     badge: "P1 Major",
-    text: "Rx\n1. Tab Amiodarone 200 mg OD\n2. Tab Ciprofloxacin 500 mg BD\n3. Tab Atorvastatin 20 mg HS",
-    age: "18-64",
-    note: "UTI treatment in cardiac arrhythmia patient. High torsades de pointes risk.",
+    text: "Rx\n1. Tab Amiodarone 200 mg OD\n2. Tab Fluconazole 150 mg weekly\n3. Tab Warfarin 5 mg OD\n4. Tab Atorvastatin 20 mg HS",
+    age: "65+",
+    note: "High-risk cardiac & fungal therapy. Demonstrates multi-drug Major interactions and CYP metabolism inhibition.",
   },
   {
     title: "🛡️ Clear Prescription (No Interactions)",
