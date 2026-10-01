@@ -161,7 +161,7 @@ class ChunkOut(Strict):
 
 class EvidenceResult(Strict):
     status: Literal["FOUND", "INSUFFICIENT"]
-    retrieval_mode: Literal["faiss", "fulltext", "none"]
+    retrieval_mode: Literal["faiss", "hybrid", "hybrid_rerank", "fulltext", "none"]
     degraded: bool
     chunks: list[ChunkOut] = Field(max_length=5)
     query: str

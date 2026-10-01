@@ -24,8 +24,9 @@ Only measured numbers appear in this repo. Anything not measured is labelled **N
    → otherwise *unresolved* and a CLEAR verdict becomes impossible.
 2. **Check** every pair with one SQL query against the versioned DDInter table (Tool 1), plus duplicate ingredients.
 3. **Triage** with documented rules R1–R9 into P1/P2/P3/CLEAR and draw an interaction map (hubs, duplicates, unresolved).
-4. **Retrieve** supporting text from NLEM 2022 and ICMR Standard Treatment Workflows (Tool 2: drug prefilter → FAISS →
-   threshold → one query-expansion retry → MySQL FULLTEXT fallback).
+4. **Retrieve** supporting text from NLEM 2022 and ICMR Standard Treatment Workflows (Tool 2: drug prefilter → hybrid
+   search (FAISS + BM25 fused with RRF, optional cross-encoder rerank) → threshold → one query-expansion retry →
+   MySQL FULLTEXT fallback).
 5. **Explain** as individually cited claims in one batched LLM call; the **verifier** drops any claim that cites an
    unknown or un-supplied source, misstates the database row, isn't supported by its chunk, or strays into
    dosing/stop/switch/"safe".
@@ -59,7 +60,7 @@ Sign in as `pharmacist` (or `admin` for the Judge Attack failure toggles) with `
 ### Docker (web + mysql + frontend)
 
 ```bash
-cp .env.example .env        # fill in secrets; ANTHROPIC_API_KEY is optional
+cp .env.example .env        # fill in secrets; GEMINI_API_KEY (or ANTHROPIC_API_KEY) is optional
 python scripts/download_data.py
 docker compose up -d --build
 docker compose exec web python manage.py seed        # ~5 min: KB + corpus + FAISS, new KB version
@@ -72,9 +73,9 @@ If `registry.npmjs.org` is blocked on your network, set `NPM_REGISTRY` in `.env`
 ### Tests and evaluation
 
 ```bash
-cd backend && python -m pytest -q          # 53 unit + API tests on SQLite, no LLM key
+cd backend && python -m pytest -q          # 65 unit + API tests on SQLite, no LLM key, no model downloads
 python eval/run.py                          # 20 core cases + 15 adversarial -> EVAL_REPORT.md, evaluation_runs table
-python scripts/calibrate_retrieval.py      # retrieval-threshold calibration table
+python scripts/calibrate_retrieval.py      # retrieval-threshold calibration table (--rerank: cross-encoder too)
 ```
 
 ## API
@@ -119,14 +120,28 @@ All prescriptions in this repo are synthetic.
 - **Deterministic-first.** `/check` makes zero LLM calls when every line is in the dictionary (measured zero-token
   share is in the eval report). Flags, severity, priority and escalation never depend on the model.
 - **Two SLA tiers** (targets until measured under load): `/check` P95 < 1.5 s, `/explain` P95 < 8 s.
-- **Models** (configuration, not code): primary `claude-opus-5-5` at low effort, fallback `claude-haiku-4-5`, then
-  template mode. Structured outputs + Pydantic re-validation; one retry carrying the validation error.
-  `LLM_MAX_OUTPUT_TOKENS_PER_CALL` defaults to 1,500 rather than the spec's 800 example because the primary model's
-  thinking tokens count toward `max_tokens`. Per-query cap: 3 calls / 6,000 input tokens.
+- **Models** (configuration, not code): primary `gemini-3.5-flash-lite`, fallback `gemini-3.5-flash` (low thinking),
+  then template mode. Any non-`gemini-*` model ID goes to Anthropic instead (`claude-opus-5-5` / `claude-haiku-4-5`
+  were the earlier defaults), and the chain may mix providers. Why flash-lite first: measured 2026-10-01 on the free
+  tier, it answered every call in 0.7–1.7 s, while `gemini-3.5-flash` timed out at 10 s or returned 503 under load
+  and `gemini-3.8-flash` allows only 20 free requests per day. Structured outputs (JSON schema) + Pydantic
+  re-validation; one retry carrying the validation error. `LLM_MAX_OUTPUT_TOKENS_PER_CALL` defaults to 1,500 rather
+  than the spec's 800 example because thinking tokens count toward the output limit (and are billed as output).
+  Per-query cap: 3 calls / 6,000 input tokens.
 - **Quarantined input.** The explanation model never sees the uploaded prescription — only structured findings
   and curated corpus chunks, wrapped as quoted data. Extraction spans must occur verbatim in the line. Injected
   lines are classified as suspicious and can never become drugs.
 - **No separate vector DB.** ~530 chunks → FAISS `IndexFlatIP` in the web process; FULLTEXT fallback in MySQL.
+- **Hybrid retrieval.** Dense (e5 + FAISS) and keyword (BM25, built in memory from `corpus_chunks`) rankings are
+  fused with Reciprocal Rank Fusion, so exact terms like "STW", drug names and section titles are not lost to the
+  embedding. BM25 only changes *which* candidates are considered and their order: a chunk still needs a dense score
+  ≥ `RETRIEVAL_MIN_SCORE` to count, so keyword overlap alone never becomes evidence and the refusal behaviour is
+  unchanged. An optional cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`, baked into the image) re-scores
+  the top 8 fused candidates; when `RETRIEVAL_RERANK=1` its score replaces the dense cutoff
+  (`RERANK_MIN_SCORE`). It ships **off** because that cutoff has not been calibrated on the real corpus yet; if the
+  model fails to load, retrieval falls back to the dense cutoff. Reranking adds CPU time inside Tool 2's 1 s
+  timeout - re-measure `/explain` P95 and raise `TOOL2_TIMEOUT_S` if needed. `RETRIEVAL_HYBRID=0` restores FAISS-only for A/B
+  comparison in the eval.
 - **Evidence must be about the pair.** A finding is FOUND only if a chunk mentions *both* drugs — directly or via a
   team-curated class term (`data/curated/drug_classes.csv`: "anticoagulants" → Warfarin, "NSAIDs" → Ibuprofen …),
   and never only through one shared class term. Every evidence card shows how each drug was matched. Passages that
@@ -148,8 +163,9 @@ All prescriptions in this repo are synthetic.
 | Setting | Value | How chosen |
 |---|---|---|
 | Fuzzy auto-accept / candidate | 92 / 80 (margin ≥ 3) | spec starting values; "amlodipne" → Amlodipine at 94.7 in the eval |
-| `RETRIEVAL_MIN_SCORE` | **0.81** | `scripts/calibrate_retrieval.py` on KB v3: in-corpus top scores 0.816–0.854, out-of-corpus 0.740–0.806. The margin is only ~0.01 on a 12-query sample. |
+| `RETRIEVAL_MIN_SCORE` | **0.81** (also the cutoff in hybrid mode) | `scripts/calibrate_retrieval.py` on KB v3: in-corpus top scores 0.816–0.854, out-of-corpus 0.740–0.806. The margin is only ~0.01 on a 12-query sample. |
 | `SUPPORT_THRESHOLD` (verifier) | 0.6 | spec starting value |
+| `RERANK_MIN_SCORE` | 0.5, **reranker off** | placeholder - calibrate with `scripts/calibrate_retrieval.py --rerank` before enabling |
 
 ## Known limitations
 
@@ -168,8 +184,15 @@ All prescriptions in this repo are synthetic.
 - Conflict detection is narrow (contraindication wording in a chunk vs Minor/Unknown severity) and was not
   triggered by any case on real data.
 - Red-flag, dosing and injection detection are rule-based and can miss unusual phrasings.
-- **LLM paths were not measured in this build** (no API key in the build environment): citation correctness of
-  LLM claims, LLM latency (load-test run B) and cost per query with real calls are NOT MEASURED.
+- **LLM paths are measured only on the test fixture so far:** with a Gemini key, `/check` → `/explain` → `/ask`
+  ran end-to-end (6 calls, all on `gemini-3.5-flash-lite`, 0.7–1.7 s each, every claim through the verifier). The
+  full eval, load-test run B and real cost per query still need a run against the seeded KB. EVAL_REPORT.md
+  predates the Gemini provider. Gemini prices are not set by default (`LLM_PRICES`), so USD costs read $0 until
+  they are.
+- **Free-tier Gemini quotas are small** (e.g. 20 requests/day for `gemini-3.8-flash`); a 429 falls through the chain
+  to template mode, so flags never depend on quota, but demos and eval runs should use a model with headroom.
+- **The cross-encoder cutoff is uncalibrated** and reranking is off by default; the hybrid (BM25 + RRF) effect on
+  Recall@5 has not been re-measured on the real corpus yet.
 - The Malayalam/Hindi explanation layer (stretch) is not built.
 - No clinical validation with practising pharmacists.
 - Performance numbers apply only to the measured machine (laptop, Docker Desktop) and load profile; run C used an
@@ -182,7 +205,7 @@ All prescriptions in this repo are synthetic.
 | Tier | Requirement | Status |
 |---|---|---|
 | Must | Working end-to-end system | Built: /check → /explain → review → audit |
-| Must | RAG over a domain corpus | Built: NLEM 2022 + 13 ICMR STWs, e5 + FAISS, metadata-rich citations |
+| Must | RAG over a domain corpus | Built: NLEM 2022 + 13 ICMR STWs, hybrid e5/FAISS + BM25 (RRF), optional cross-encoder rerank, metadata-rich citations |
 | Must | Agent with ≥2 real tools | Built: LangGraph graphs + 3 tools; Mode B ToolPlan agent |
 | Must | Django DRF endpoint | Built |
 | Must | MySQL-backed session memory | Built: sessions + session_messages; "the second one" resolves |
@@ -191,7 +214,7 @@ All prescriptions in this repo are synthetic.
 | Must | README + architecture diagram | This file + docs/architecture.md |
 | Should | Docker + live URL | Compose stack built and run locally; **no public URL deployed from this environment** |
 | Should | Structured logs + correlation IDs | Built: JSON logs; X-Request-ID on requests, tool/LLM calls, audit rows |
-| Should | Fallback chain | Built: LLM → fallback → template; FAISS → FULLTEXT; MySQL → fail closed |
+| Should | Fallback chain | Built: Gemini flash-lite → Gemini flash (or Claude) → template; FAISS → FULLTEXT; reranker → dense cutoff; MySQL → fail closed |
 | Should | P50/P95 latency | Measured on localhost Docker: `/check` P95 1,068 ms (run A, PASS); `/explain` P95 5,029 ms with a mocked 2 s LLM (run C, PASS with caveats); run B NOT MEASURED |
 | Should | Adversarial inputs | 15-case bank automated in the eval |
 | Stretch | Human-in-the-loop | Built: review actions, P1 gate, item confirmation |

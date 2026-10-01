@@ -6,6 +6,8 @@ os.environ.setdefault("DB_ENGINE", "sqlite")
 os.environ.setdefault("DJANGO_DEBUG", "1")
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-only")
 os.environ.pop("ANTHROPIC_API_KEY", None)  # tests never call a real LLM
+os.environ.pop("GEMINI_API_KEY", None)
+os.environ.pop("GOOGLE_API_KEY", None)
 
 import pytest  # noqa: E402
 

@@ -4,6 +4,7 @@ django-cors-headers==4.6.0
 mysqlclient==2.2.6
 pydantic==2.10.4
 anthropic==1.9.0
+google-genai==2.26.0
 langgraph==0.2.60
 rapidfuzz==3.11.0
 numpy==1.26.4

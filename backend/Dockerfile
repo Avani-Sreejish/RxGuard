@@ -12,7 +12,9 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu --extra-i
     && pip install -r requirements.txt
 # Bake the embedding model into the image so the container never downloads at request time
 ARG EMBEDDING_MODEL=intfloat/multilingual-e5-base
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
+ARG RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')" \
+    && python -c "from sentence_transformers import CrossEncoder; CrossEncoder('${RERANK_MODEL}')"
 # The model is baked in: never contact the Hub at runtime
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 OMP_NUM_THREADS=4
 COPY backend/ /app/backend/

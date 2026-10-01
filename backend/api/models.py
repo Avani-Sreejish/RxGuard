@@ -294,7 +294,7 @@ class EvidenceLink(models.Model):
     chunk = models.ForeignKey(CorpusChunk, on_delete=models.PROTECT, null=True)
     status = models.CharField(max_length=16)  # FOUND | INSUFFICIENT
     score = models.FloatField(null=True)
-    retrieval_mode = models.CharField(max_length=16)  # faiss | fulltext
+    retrieval_mode = models.CharField(max_length=16)  # faiss | hybrid | hybrid_rerank | fulltext | none
     kb_version = models.ForeignKey(KbVersion, on_delete=models.PROTECT)
 
     class Meta:

@@ -1,8 +1,13 @@
 """Tool 2 - guideline_search: supporting evidence from the curated corpus (spec 9, 11).
 
 Returns documents only; generates nothing. Pipeline:
-drug prefilter (chunk_drug_mentions) -> FAISS -> score threshold -> one deterministic
-query-expansion retry -> INSUFFICIENT. FAISS failure -> MySQL FULLTEXT, marked degraded.
+drug prefilter (chunk_drug_mentions) -> hybrid search (FAISS + BM25, fused with RRF, optional cross-encoder
+rerank) -> score threshold -> one deterministic query-expansion retry -> INSUFFICIENT.
+FAISS failure -> MySQL FULLTEXT, marked degraded.
+
+Threshold: with the reranker on, a chunk must reach RERANK_MIN_SCORE; otherwise its dense score must reach
+RETRIEVAL_MIN_SCORE (the calibrated FAISS cutoff). BM25 only changes which candidates are considered and
+their order - it never lets a chunk through on keyword overlap alone.
 """
 from __future__ import annotations
 
@@ -75,7 +80,6 @@ def guideline_search(kb_id: int, kb_label: str, drug_ids: list[int], query: str,
     from api.models import ChunkDrugMention, CorpusChunk
 
     k = max(1, min(k, 5))
-    threshold = settings.RXGUARD["RETRIEVAL_MIN_SCORE"]
     base = CorpusChunk.objects.filter(document__kb_version_id=kb_id)
     if doc_types:
         base = base.filter(document__doc_type__in=doc_types)
@@ -96,23 +100,38 @@ def guideline_search(kb_id: int, kb_label: str, drug_ids: list[int], query: str,
         if allowed_ids is not None:
             allowed_rows = [r for r in base.filter(id__in=allowed_ids).values_list("faiss_row", flat=True)
                             if r is not None]
-        hits = retrieval.search(kb_label, query, k * 3, allowed_rows, query_vector=query_vector)
-        passing = [(r, s) for r, s in hits if s >= threshold]
+        passing, mode = _ranked_passing(kb_label, base, query, k, allowed_rows, query_vector)
         used_query = query
         if not passing and drug_ids:
             used_query = expansion_query(query, drug_ids)
-            hits = retrieval.search(kb_label, used_query, k * 3, allowed_rows, query_vector=expansion_vector)
-            passing = [(r, s) for r, s in hits if s >= threshold]
+            passing, mode = _ranked_passing(kb_label, base, used_query, k, allowed_rows, expansion_vector)
         passing = passing[:k]
         rows = {c.faiss_row: c for c in base.filter(faiss_row__in=[r for r, _ in passing]).select_related("document")}
         chunks = [_chunk_out(rows[r], s) for r, s in passing if r in rows]
-        return EvidenceResult(status="FOUND" if chunks else "INSUFFICIENT", retrieval_mode="faiss", degraded=False,
+        return EvidenceResult(status="FOUND" if chunks else "INSUFFICIENT", retrieval_mode=mode, degraded=False,
                               chunks=chunks, query=used_query).model_dump()
     except retrieval.IndexUnavailable as e:
         log.warning("faiss_unavailable_fulltext_fallback", extra={"reason": str(e)})
         # Degraded mode has no semantic score to filter on, so it is stricter about the prefilter:
         # a chunk must mention every requested drug to count as evidence.
         return _fulltext(base, all_ids if drug_ids else allowed_ids, query, drug_ids, k)
+
+
+def _ranked_passing(kb_label: str, base, query: str, k: int, allowed_rows, query_vector) -> tuple[list, str]:
+    """[(faiss_row, score)] best-first that pass the threshold, and the retrieval mode used."""
+    cfg = settings.RXGUARD
+    if not cfg["RETRIEVAL_HYBRID"]:
+        hits = retrieval.search(kb_label, query, k * 3, allowed_rows, query_vector=query_vector)
+        return [(r, s) for r, s in hits if s >= cfg["RETRIEVAL_MIN_SCORE"]], "faiss"
+
+    def fetch_texts(rows):
+        return dict(base.filter(faiss_row__in=rows).values_list("faiss_row", "text"))
+
+    cands = retrieval.hybrid_search(kb_label, query, k, allowed_rows, query_vector=query_vector,
+                                    fetch_texts=fetch_texts)
+    if cands and cands[0]["rerank"] is not None:
+        return [(c["row"], c["rerank"]) for c in cands if c["rerank"] >= cfg["RERANK_MIN_SCORE"]], "hybrid_rerank"
+    return [(c["row"], c["dense"]) for c in cands if c["dense"] >= cfg["RETRIEVAL_MIN_SCORE"]], "hybrid"
 
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z\-]{2,}")
