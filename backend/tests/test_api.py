@@ -194,3 +194,22 @@ def test_explain_caps_llm_findings_but_keeps_every_db_fact(client, settings):
     e = client.post("/api/v1/explain", {"prescription_id": b["id"]}, format="json").json()
     db_claims = {c["finding_ordinal"] for c in e["explanation"]["claims"] if c["source_type"] == "DATABASE"}
     assert db_claims == {f["ordinal"] for f in b["findings"]} and len(db_claims) > 2
+
+
+def test_translate_explanation(client):
+    """Verify that Hindi regional translation endpoint returns localized findings and clinical claims."""
+    b = check(client, MAIN).json()
+    client.post("/api/v1/explain", {"prescription_id": b["id"]}, format="json")
+    
+    res = client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": "hi"}, format="json")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["language"] == "hi"
+    assert "translated_findings" in data
+    assert len(data["translated_findings"]) > 0
+    first = data["translated_findings"][0]
+    assert "severity_hi" in first
+    assert "db_claim_hi" in first
+    assert "clinical_advice_hi" in first
+
+

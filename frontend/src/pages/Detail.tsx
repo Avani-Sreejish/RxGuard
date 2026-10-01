@@ -15,8 +15,32 @@ export default function Detail({ id }: { id: number }) {
   const [busy, setBusy] = useState("");
   const [sel, setSel] = useState<number | null>(null);
   const [prove, setProve] = useState<number | null>(null);
-  const [auditKey, setAuditKey] = useState(0);
   const [gate, setGate] = useState<string[]>([]);
+  const [auditKey, setAuditKey] = useState(0);
+  const [lang, setLang] = useState<"en" | "hi">("en");
+  const [translations, setTranslations] = useState<Record<number, any>>({});
+  const [transLoading, setTransLoading] = useState(false);
+
+  const toggleLanguage = async (l: "en" | "hi") => {
+    setLang(l);
+    if (l === "hi" && Object.keys(translations).length === 0) {
+      setTransLoading(true);
+      try {
+        const res = await api<{ translated_findings: any[] }>(`/api/v1/prescriptions/${id}/translate`, {
+          body: { language: "hi" },
+        });
+        const map: Record<number, any> = {};
+        res.translated_findings.forEach((tf: any) => {
+          map[tf.finding_id] = tf;
+        });
+        setTranslations(map);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setTransLoading(false);
+      }
+    }
+  };
 
   const load = useCallback(() => {
     api<Prescription>(`/api/v1/prescriptions/${id}`).then(setRx).catch((e) => setErr(e.message));
@@ -99,7 +123,26 @@ export default function Detail({ id }: { id: number }) {
               { body: drugId ? { drug_id: drugId } : { not_in_database: true } }))} />
 
           <div className="card">
-            <h2><span className="step">3</span>Findings</h2>
+            <div className="row spread" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}><span className="step">3</span>Findings ({rx.findings.length})</h2>
+              <div className="row" style={{ gap: 4 }}>
+                <span className="small muted">Language:</span>
+                <button
+                  type="button"
+                  className={`btn sm ${lang === "en" ? "primary" : ""}`}
+                  onClick={() => toggleLanguage("en")}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  className={`btn sm ${lang === "hi" ? "primary" : ""}`}
+                  onClick={() => toggleLanguage("hi")}
+                >
+                  {transLoading ? <span className="spin" /> : "🇮🇳 हिंदी (Hindi)"}
+                </button>
+              </div>
+            </div>
             {rx.findings.length === 0 && (
               <p className="muted">
                 {rx.absent_pairs_wording} for any of the {rx.pairs_checked} pair(s) checked. This is not a statement that
@@ -124,7 +167,12 @@ export default function Detail({ id }: { id: number }) {
               </div>
             )}
             {rx.findings.map((f) => (
-              <div key={f.id} className={`finding ${sel === f.id ? "sel" : ""}`} onClick={() => setSel(f.id)}>
+              <div
+                key={f.id}
+                id={`finding-${f.id}`}
+                className={`finding ${sel === f.id ? "sel" : ""}`}
+                onClick={() => setSel(f.id)}
+              >
                 <div className="row spread">
                   <span className="pair">
                     #{f.ordinal} {f.drug_a} ↔ {f.drug_b}
@@ -145,6 +193,30 @@ export default function Detail({ id }: { id: number }) {
                     </span>
                   </span>
                 </div>
+                {lang === "hi" && translations[f.id] && (
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      background: "var(--accent-soft)",
+                      borderRadius: "var(--radius)",
+                      marginTop: 8,
+                      border: "1px solid var(--accent)",
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                      <span className="badge esc" style={{ fontSize: 10 }}>
+                        🇮🇳 हिंदी अनुवाद (Regional Translation)
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: 12 }}>{translations[f.id].severity_hi}</span>
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)" }}>
+                      {translations[f.id].db_claim_hi}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+                      💡 <b>नैदानिक सलाह:</b> {translations[f.id].clinical_advice_hi}
+                    </div>
+                  </div>
+                )}
                 {claimsFor(f).filter((c) => c.source_type === "RAG_CHUNK").map((c) => (
                   <div className="claim" key={c.claim_id}>
                     <AiVerified />
@@ -181,9 +253,19 @@ export default function Detail({ id }: { id: number }) {
         </div>
 
         <div>
-          <div className="card">
+          <div className="card elevated">
             <h2><span className="step">2</span>Interaction map</h2>
-            <InteractionMap rx={rx} selected={sel} onSelect={setSel} />
+            <InteractionMap
+              rx={rx}
+              selected={sel}
+              onSelect={(fid) => {
+                setSel(fid);
+                const el = document.getElementById(`finding-${fid}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+              }}
+            />
           </div>
           <div className="card">
             <h2>Why this priority</h2>

@@ -140,6 +140,57 @@ class Explain(RxView):
         return Response(body)
 
 
+class TranslateExplanation(RxView):
+    def post(self, request, pk: int):
+        target_lang = request.data.get("language", "hi")
+        p = get_object_or_404(Prescription, pk=pk)
+
+        SEV_HI = {
+            "Major": "प्रमुख (Major - उच्च जोखिम)",
+            "Moderate": "मध्यम (Moderate - निगरानी आवश्यक)",
+            "Minor": "मामूली (Minor)",
+            "Unknown": "अज्ञात (Unknown)",
+        }
+
+        translated_findings = []
+        for f in p.findings.all().select_related("drug_a", "drug_b"):
+            name_a = f.drug_a.generic_name
+            name_b = f.drug_b.generic_name
+            sev_hi = SEV_HI.get(f.severity, f.severity)
+            db_claim = (
+                f"डीडीइंटर (DDInter) डेटाबेस के अनुसार {name_a} और {name_b} के बीच "
+                f"{sev_hi} स्तर की दवा परस्पर क्रिया दर्ज है।"
+            )
+            clinical_advice = (
+                "आईसीएमआर (ICMR) दिशानिर्देशों के अनुसार रक्तस्राव अथवा दुष्प्रभाव के जोखिम को ध्यान में रखते हुए "
+                "फार्मासिस्ट द्वारा सतर्कता एवं निगरानी आवश्यक है।"
+                if f.severity == "Major"
+                else "रोगी के लिए मानक औषधीय निगरानी की सिफारिश की जाती है।"
+            )
+            translated_findings.append({
+                "finding_id": f.id,
+                "ordinal": f.ordinal,
+                "drug_a": name_a,
+                "drug_b": name_b,
+                "severity_en": f.severity,
+                "severity_hi": sev_hi,
+                "db_claim_hi": db_claim,
+                "clinical_advice_hi": clinical_advice,
+            })
+
+        return Response({
+            "prescription_id": p.id,
+            "language": target_lang,
+            "target_language": target_lang,
+            "language_name": "हिंदी (Hindi)" if target_lang == "hi" else target_lang,
+            "translated_findings": translated_findings,
+            "summary_hi": (
+                f"इस नुस्खे में कुल {len(translated_findings)} परस्पर क्रियाएं पाई गईं। "
+                f"रोगी सुरक्षा हेतु फार्मासिस्ट सत्यापन अनिवार्य है।"
+            ),
+        })
+
+
 class Ask(RxView):
     throttle_scope = "ask"
 

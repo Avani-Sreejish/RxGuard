@@ -19,6 +19,7 @@ urlpatterns = [
     path(api + "prescriptions", v.PrescriptionList.as_view()),
     path(api + "prescriptions/<int:pk>", v.PrescriptionDetail.as_view()),
     path(api + "prescriptions/<int:pk>/complete", v.PrescriptionComplete.as_view()),
+    path(api + "prescriptions/<int:pk>/translate", v.TranslateExplanation.as_view()),
     path(api + "prescriptions/<int:pk>/items/<int:item_id>/confirm", v.ConfirmItem.as_view()),
     path(api + "prescriptions/<int:prescription_id>/steps", v.AgentSteps.as_view()),
     path(api + "findings/<int:pk>", v.FindingDetail.as_view()),
