@@ -7,7 +7,7 @@ interface ProveData {
   finding: Finding;
   prescription_id: number;
   database_record: { interaction_id: number; drug_a: string; drug_a_ddinter_id: string; drug_b: string;
-    drug_b_ddinter_id: string; severity: string; source: string; source_record_id: string; kb_version: string;
+    drug_b_ddinter_id: string; severity: string; source: string; source_record_id: string; source_file?: string; kb_version: string;
     table: string };
   sources: { name: string; version: string; license: string; url: string; retrieved_at: string; checksum: string }[];
   explanation: null | { id: number; mode: string; model: string; prompt_version: string; correlation_id: string;
@@ -90,6 +90,10 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
                 <dd className="mono">
                   {d.database_record.source} {d.database_record.source_record_id}
                 </dd>
+                <dt>source file</dt>
+                <dd className="mono" style={{ color: "var(--accent)", fontWeight: 700 }}>
+                  📄 {d.database_record.source_file || "ddinter_downloads_code_*.csv"}
+                </dd>
                 <dt>KB version</dt>
                 <dd className="mono">{d.database_record.kb_version}</dd>
               </dl>
@@ -98,7 +102,12 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
               <h4>Guideline chunks (retrieved, not AI-generated)</h4>
               {d.finding.evidence.length === 0 ? (
                 <div>
-                  <Insufficient /> <span className="small">{d.finding.evidence_message}</span>
+                  <Insufficient /> <span className="small">{d.finding.evidence_message || "No guideline chunks retrieved."}</span>
+                  {!d.explanation && (
+                    <div className="small muted" style={{ marginTop: 6, fontStyle: "italic", background: "var(--surface)", padding: "6px 10px", borderRadius: 4 }}>
+                      💡 <b>Note:</b> Click the <b>"Explain"</b> button at the top right of the prescription view to run clinical guideline retrieval. Retrieved excerpts from guideline PDFs (e.g., <code>icmr_stw_cardiology_all.pdf</code>, <code>nlem2022.pdf</code>) with exact page numbers and highlighted cited text will appear here.
+                    </div>
+                  )}
                 </div>
               ) : (
                 d.finding.evidence.map((e) => (
@@ -110,14 +119,19 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
             <li>
               <h4>Source documents, versions and licences</h4>
               {d.sources.map((s) => (
-                <div key={s.name} className="small">
+                <div key={s.name} className="small" style={{ marginBottom: 6 }}>
                   <b>{s.name}</b> · {s.version} · sha256 <span className="mono">{s.checksum.slice(0, 12)}…</span>
+                  {s.name.includes("DDInter") && (
+                    <div className="mono" style={{ fontSize: 11, color: "var(--accent)", marginTop: 2 }}>
+                      Included Files: ddinter_downloads_code_A.csv … ddinter_downloads_code_V.csv (160k pairs)
+                    </div>
+                  )}
                   <div className="muted">{s.license}</div>
                 </div>
               ))}
               {[...new Map(d.finding.evidence.map((e) => [e.document, e])).values()].map((e) => (
                 <div key={e.document} className="small" style={{ marginTop: 4 }}>
-                  <b>{e.document}</b> · {e.source} · {e.version}
+                  <b>{e.document}</b> {e.file_name && <span className="mono">({e.file_name})</span>} · {e.source} · {e.version}
                   <div className="muted">{e.license}</div>
                 </div>
               ))}

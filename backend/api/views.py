@@ -317,13 +317,19 @@ class FindingDetail(RxView):
                                                                 "finding").order_by("id"):
                 claims.append(S.claim_dict(c))
         i = f.interaction
+        source_file = "ddinter_downloads_code_A-V.csv (DDInter 1.0 Dataset)"
+        if i.source and ("upload" in i.source.lower() or ".csv" in i.source.lower()):
+            source_file = i.source.replace("Pharmacist Upload: ", "")
+        elif i.source and i.source != "DDInter":
+            source_file = f"{i.source}.csv"
+
         return Response({
             "finding": S.finding_dict(f, S._kb_current()),
             "prescription_id": p.id,
             "database_record": {"interaction_id": i.id, "drug_a": i.drug_a.generic_name, "drug_a_ddinter_id":
                                 i.drug_a.ddinter_id, "drug_b": i.drug_b.generic_name,
                                 "drug_b_ddinter_id": i.drug_b.ddinter_id, "severity": i.severity, "source": i.source,
-                                "source_record_id": i.source_record_id, "kb_version": i.kb_version.label,
+                                "source_record_id": i.source_record_id, "source_file": source_file, "kb_version": i.kb_version.label,
                                 "table": "drug_interactions"},
             "sources": list(DataSource.objects.filter(kb_version=f.kb_version, name__icontains="DDInter").values(
                 "name", "version", "license", "url", "retrieved_at", "checksum")),
