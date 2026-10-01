@@ -131,6 +131,11 @@ def get_alias_index(kb) -> AliasIndex:
         return idx
 
 
+def clear_cache():
+    with _index_lock:
+        _index_cache.clear()
+
+
 def build_alias_index(kb) -> AliasIndex:
     from api.models import Drug, DrugAlias, Product
 

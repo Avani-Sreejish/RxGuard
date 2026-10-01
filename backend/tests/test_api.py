@@ -225,4 +225,47 @@ def test_translate_explanation(client):
     assert "ഐസിഎംആർ" in first_ml["clinical_advice_ml"]
 
 
+def test_upload_interactions_and_immediate_check(client):
+    """Pharmacist uploads a custom CSV pair (Amiodarone + Ciprofloxacin) and /check immediately detects it."""
+    csv_content = (
+        "drug_a,drug_b,severity,notes\n"
+        "Amiodarone,Ciprofloxacin,Major,Torsades de pointes ventricular arrhythmia risk\n"
+    )
+    res = client.post("/api/v1/kb/interactions/upload", {"csv_text": csv_content}, format="json")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["added_interactions"] >= 1
+
+    # Now verify that checking a prescription with Amiodarone and Ciprofloxacin immediately detects this Major finding!
+    rx_text = "Rx\n1. Tab Amiodarone 200 mg OD\n2. Tab Ciprofloxacin 500 mg BD"
+    check_res = check(client, rx_text)
+    assert check_res.status_code == 201
+    check_body = check_res.json()
+    assert check_body["priority"] == "P1"
+    findings = check_body["findings"]
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["severity"] == "Major"
+    assert {f["drug_a"], f["drug_b"]} == {"Amiodarone", "Ciprofloxacin"}
+
+
+def test_upload_guidelines(client):
+    """Pharmacist uploads custom guideline CSV and chunks/mentions are indexed."""
+    csv_content = (
+        "section,text,drugs\n"
+        "Cardiology - Arrhythmia,Amiodarone and Ciprofloxacin should not be co-prescribed due to fatal QT prolongation risk.,Amiodarone, Ciprofloxacin\n"
+    )
+    res = client.post("/api/v1/kb/guidelines/upload", {
+        "csv_text": csv_content,
+        "title": "Hospital Cardiology Protocol 2026",
+    }, format="json")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["chunks_created"] == 1
+    assert data["drug_mentions_tagged"] >= 1
+
+
+
 

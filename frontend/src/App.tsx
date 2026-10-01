@@ -6,6 +6,7 @@ import Detail from "./pages/Detail";
 import JudgePanel from "./pages/JudgePanel";
 import Observability from "./pages/Observability";
 import Sources from "./pages/Sources";
+import DatasetIngestion from "./pages/DatasetIngestion";
 
 export interface Me {
   username: string;
@@ -45,6 +46,7 @@ export default function App() {
   const tabs: [string, string, string][] = [
     ["queue", "📋", "Review queue"],
     ["new", "➕", "New check"],
+    ["dataset", "📥", "Dataset Ingestion"],
     ["attack", "⚔️", "Judge Attack"],
     ["obs", "📈", "Observability"],
     ["sources", "📚", "Sources & licences"],
@@ -92,6 +94,7 @@ export default function App() {
       <main>
         {page === "queue" && <Queue open={(id) => go(`rx/${id}`)} />}
         {page === "new" && <NewCheck done={(id) => go(`rx/${id}`)} />}
+        {page === "dataset" && <DatasetIngestion />}
         {page === "rx" && route[1] && <Detail id={Number(route[1])} key={route[1]} />}
         {page === "attack" && <JudgePanel me={me} open={(id) => go(`rx/${id}`)} />}
         {page === "obs" && <Observability />}
