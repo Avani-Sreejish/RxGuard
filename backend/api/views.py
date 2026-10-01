@@ -145,49 +145,94 @@ class TranslateExplanation(RxView):
         target_lang = request.data.get("language", "hi")
         p = get_object_or_404(Prescription, pk=pk)
 
-        SEV_HI = {
-            "Major": "प्रमुख (Major - उच्च जोखिम)",
-            "Moderate": "मध्यम (Moderate - निगरानी आवश्यक)",
-            "Minor": "मामूली (Minor)",
-            "Unknown": "अज्ञात (Unknown)",
+        SEV_MAP = {
+            "hi": {
+                "Major": "प्रमुख (Major - उच्च जोखिम)",
+                "Moderate": "मध्यम (Moderate - निगरानी आवश्यक)",
+                "Minor": "मामूली (Minor)",
+                "Unknown": "अज्ञात (Unknown)",
+            },
+            "ml": {
+                "Major": "ഗുരുതരം (Major - ഉയർന്ന അപകടസാധ്യത)",
+                "Moderate": "മിതമായത് (Moderate - നിരീക്ഷണം ആവശ്യമാണ്)",
+                "Minor": "ലഘുവായത് (Minor)",
+                "Unknown": "അജ്ഞാതം (Unknown)",
+            },
         }
+
+        lang_names = {
+            "hi": "हिंदी (Hindi)",
+            "ml": "മലയാളം (Malayalam)",
+        }
+
+        sev_dict = SEV_MAP.get(target_lang, SEV_MAP["hi"])
 
         translated_findings = []
         for f in p.findings.all().select_related("drug_a", "drug_b"):
             name_a = f.drug_a.generic_name
             name_b = f.drug_b.generic_name
-            sev_hi = SEV_HI.get(f.severity, f.severity)
-            db_claim = (
-                f"डीडीइंटर (DDInter) डेटाबेस के अनुसार {name_a} और {name_b} के बीच "
-                f"{sev_hi} स्तर की दवा परस्पर क्रिया दर्ज है।"
-            )
-            clinical_advice = (
-                "आईसीएमआर (ICMR) दिशानिर्देशों के अनुसार रक्तस्राव अथवा दुष्प्रभाव के जोखिम को ध्यान में रखते हुए "
-                "फार्मासिस्ट द्वारा सतर्कता एवं निगरानी आवश्यक है।"
-                if f.severity == "Major"
-                else "रोगी के लिए मानक औषधीय निगरानी की सिफारिश की जाती है।"
-            )
+            sev_trans = sev_dict.get(f.severity, f.severity)
+
+            if target_lang == "ml":
+                db_claim = (
+                    f"ഡിഡിഇന്റർ (DDInter) ഡാറ്റാബേസ് അനുസരിച്ച് {name_a}, {name_b} എന്നിവ തമ്മിൽ "
+                    f"{sev_trans} തരത്തിലുള്ള മരുന്ന് പ്രതിപ്രവർത്തനം രേഖപ്പെടുത്തിയിട്ടുണ്ട്."
+                )
+                clinical_advice = (
+                    "ഐസിഎംആർ (ICMR) മാർഗ്ഗനിർദ്ദേശങ്ങൾ പ്രകാരം രക്തസ്രാവം അല്ലെങ്കിൽ പാർശ്വഫലങ്ങൾ ഒഴിവാക്കാൻ "
+                    "ഫാർമസിസ്റ്റിന്റെ അതീവ ജാഗ്രതയും നിരീക്ഷണവും അനിവാര്യമാണ്."
+                    if f.severity == "Major"
+                    else "രോഗിക്ക് സാധാരണ നിലയിലുള്ള ഔഷധ നിരീക്ഷണം ശുപാർശ ചെയ്യുന്നു."
+                )
+            else:  # Hindi default
+                db_claim = (
+                    f"डीडीइंटर (DDInter) डेटाबेस के अनुसार {name_a} और {name_b} के बीच "
+                    f"{sev_trans} स्तर की दवा परस्पर क्रिया दर्ज है।"
+                )
+                clinical_advice = (
+                    "आईसीएमआर (ICMR) दिशानिर्देशों के अनुसार रक्तस्राव अथवा दुष्प्रभाव के जोखिम को ध्यान में रखते हुए "
+                    "फार्मासिस्ट द्वारा सतर्कता एवं निगरानी आवश्यक है।"
+                    if f.severity == "Major"
+                    else "रोगी के लिए मानक औषधीय निगरानी की सिफारिश की जाती है।"
+                )
+
             translated_findings.append({
                 "finding_id": f.id,
                 "ordinal": f.ordinal,
                 "drug_a": name_a,
                 "drug_b": name_b,
                 "severity_en": f.severity,
-                "severity_hi": sev_hi,
+                "severity_translated": sev_trans,
+                "severity_hi": sev_trans,
+                "severity_ml": sev_trans,
+                "db_claim_translated": db_claim,
                 "db_claim_hi": db_claim,
+                "db_claim_ml": db_claim,
+                "clinical_advice_translated": clinical_advice,
                 "clinical_advice_hi": clinical_advice,
+                "clinical_advice_ml": clinical_advice,
             })
+
+        if target_lang == "ml":
+            summary = (
+                f"ഈ കുറിപ്പടിയിൽ ആകെ {len(translated_findings)} മരുന്ന് പ്രതിപ്രവർത്തനങ്ങൾ കണ്ടെത്തി. "
+                f"രോഗിയുടെ സുരക്ഷയ്ക്കായി ഫാർമസിസ്റ്റിന്റെ പരിശോധന നിർബന്ധമാണ്."
+            )
+        else:
+            summary = (
+                f"इस नुस्खे में कुल {len(translated_findings)} परस्पर क्रियाएं पाई गईं। "
+                f"रोगी सुरक्षा हेतु फार्मासिस्ट सत्यापन अनिवार्य है।"
+            )
 
         return Response({
             "prescription_id": p.id,
             "language": target_lang,
             "target_language": target_lang,
-            "language_name": "हिंदी (Hindi)" if target_lang == "hi" else target_lang,
+            "language_name": lang_names.get(target_lang, target_lang),
             "translated_findings": translated_findings,
-            "summary_hi": (
-                f"इस नुस्खे में कुल {len(translated_findings)} परस्पर क्रियाएं पाई गईं। "
-                f"रोगी सुरक्षा हेतु फार्मासिस्ट सत्यापन अनिवार्य है।"
-            ),
+            "summary_translated": summary,
+            "summary_hi": summary,
+            "summary_ml": summary,
         })
 
 

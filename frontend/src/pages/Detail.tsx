@@ -17,23 +17,23 @@ export default function Detail({ id }: { id: number }) {
   const [prove, setProve] = useState<number | null>(null);
   const [gate, setGate] = useState<string[]>([]);
   const [auditKey, setAuditKey] = useState(0);
-  const [lang, setLang] = useState<"en" | "hi">("en");
-  const [translations, setTranslations] = useState<Record<number, any>>({});
+  const [lang, setLang] = useState<"en" | "hi" | "ml">("en");
+  const [translations, setTranslations] = useState<Record<string, Record<number, any>>>({});
   const [transLoading, setTransLoading] = useState(false);
 
-  const toggleLanguage = async (l: "en" | "hi") => {
+  const toggleLanguage = async (l: "en" | "hi" | "ml") => {
     setLang(l);
-    if (l === "hi" && Object.keys(translations).length === 0) {
+    if (l !== "en" && !translations[l]) {
       setTransLoading(true);
       try {
         const res = await api<{ translated_findings: any[] }>(`/api/v1/prescriptions/${id}/translate`, {
-          body: { language: "hi" },
+          body: { language: l },
         });
         const map: Record<number, any> = {};
         res.translated_findings.forEach((tf: any) => {
           map[tf.finding_id] = tf;
         });
-        setTranslations(map);
+        setTranslations((prev) => ({ ...prev, [l]: map }));
       } catch (e) {
         console.error(e);
       } finally {
@@ -139,7 +139,14 @@ export default function Detail({ id }: { id: number }) {
                   className={`btn sm ${lang === "hi" ? "primary" : ""}`}
                   onClick={() => toggleLanguage("hi")}
                 >
-                  {transLoading ? <span className="spin" /> : "🇮🇳 हिंदी (Hindi)"}
+                  {transLoading && lang === "hi" ? <span className="spin" /> : "🇮🇳 हिंदी"}
+                </button>
+                <button
+                  type="button"
+                  className={`btn sm ${lang === "ml" ? "primary" : ""}`}
+                  onClick={() => toggleLanguage("ml")}
+                >
+                  {transLoading && lang === "ml" ? <span className="spin" /> : "🌴 മലയാളം"}
                 </button>
               </div>
             </div>
@@ -193,7 +200,7 @@ export default function Detail({ id }: { id: number }) {
                     </span>
                   </span>
                 </div>
-                {lang === "hi" && translations[f.id] && (
+                {lang !== "en" && translations[lang]?.[f.id] && (
                   <div
                     style={{
                       padding: "10px 14px",
@@ -205,15 +212,18 @@ export default function Detail({ id }: { id: number }) {
                   >
                     <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                       <span className="badge esc" style={{ fontSize: 10 }}>
-                        🇮🇳 हिंदी अनुवाद (Regional Translation)
+                        {lang === "hi" ? "🇮🇳 हिंदी अनुवाद" : "🌴 മലയാളം പരിഭാഷ"} (Regional Translation)
                       </span>
-                      <span style={{ fontWeight: 700, fontSize: 12 }}>{translations[f.id].severity_hi}</span>
+                      <span style={{ fontWeight: 700, fontSize: 12 }}>
+                        {translations[lang][f.id].severity_translated || translations[lang][f.id].severity_hi}
+                      </span>
                     </div>
                     <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)" }}>
-                      {translations[f.id].db_claim_hi}
+                      {translations[lang][f.id].db_claim_translated || translations[lang][f.id].db_claim_hi}
                     </div>
                     <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-                      💡 <b>नैदानिक सलाह:</b> {translations[f.id].clinical_advice_hi}
+                      💡 <b>{lang === "hi" ? "नैदानिक सलाह" : "ക്ലിനിക്കൽ നിർദ്ദേശം"}:</b>{" "}
+                      {translations[lang][f.id].clinical_advice_translated || translations[lang][f.id].clinical_advice_hi}
                     </div>
                   </div>
                 )}
