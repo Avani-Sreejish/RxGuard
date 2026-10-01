@@ -68,11 +68,13 @@ def _gemini_key() -> str | None:
     return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 
+def _has_key(model: str) -> bool:
+    return bool(_gemini_key()) if provider(model) == "gemini" else bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 def configured() -> bool:
     """True if at least one model in the chain has an API key (used by readiness and the eval report)."""
-    keys = {"anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")), "gemini": bool(_gemini_key())}
-    return any(keys[provider(m)] for m in (settings.RXGUARD["LLM_PRIMARY_MODEL"],
-                                           settings.RXGUARD["LLM_FALLBACK_MODEL"]))
+    return any(_has_key(m) for m in (settings.RXGUARD["LLM_PRIMARY_MODEL"], settings.RXGUARD["LLM_FALLBACK_MODEL"]))
 
 
 class _KeyMissing(Exception):
@@ -230,9 +232,17 @@ def call_structured(node: str, prompt, user: str, output_model: type[BaseModel],
     prompts.register(prompt)
     schema = json_schema_for(output_model)
     chain = [settings.RXGUARD["LLM_PRIMARY_MODEL"], settings.RXGUARD["LLM_FALLBACK_MODEL"]]
+    if not any(_has_key(m) for m in chain):
+        budget.fallback_level = 2
+        needed = sorted({"GEMINI_API_KEY" if provider(m) == "gemini" else "ANTHROPIC_API_KEY" for m in chain})
+        raise LlmUnavailable(f"no API key configured for the LLM chain (set {' or '.join(needed)})")
     max_out = settings.RXGUARD["LLM_MAX_OUTPUT_TOKENS_PER_CALL"]
     last_error = ""
     for level, model in enumerate(chain):
+        if not _has_key(model):
+            # A model without a key is skipped, not attempted: it must not use up the per-query call budget
+            # or show up as an LLM call / fallback in the metrics.
+            continue
         feedback = ""
         for attempt in range(2):  # first try + one retry carrying the validation error
             est_in = (len(prompt.system) + len(user) + len(feedback) + len(json.dumps(schema))) // 3

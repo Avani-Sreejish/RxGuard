@@ -22,8 +22,9 @@ import ssl
 try:
     import certifi
     SSL_CTX = ssl.create_default_context(cafile=certifi.where())
-except Exception:
-    SSL_CTX = ssl._create_unverified_context()
+except ImportError:
+    SSL_CTX = ssl.create_default_context()
+ALLOW_INSECURE = False  # set by --insecure
 
 
 def fetch(url: str, dest: Path):
@@ -35,9 +36,14 @@ def fetch(url: str, dest: Path):
     try:
         with urllib.request.urlopen(req, timeout=180, context=SSL_CTX) as r, open(dest, "wb") as f:
             f.write(r.read())
-    except urllib.error.URLError:
-        unverified_ctx = ssl._create_unverified_context()
-        with urllib.request.urlopen(req, timeout=180, context=unverified_ctx) as r, open(dest, "wb") as f:
+    except urllib.error.URLError as e:
+        if not (ALLOW_INSECURE and isinstance(getattr(e, "reason", None), ssl.SSLError)):
+            raise
+        # Only with --insecure: retry without certificate verification. Compare the printed SHA-256 values
+        # with a trusted copy before seeding - the data could have been altered in transit.
+        print(f"WARNING: TLS verification failed for {url}; retrying WITHOUT verification (--insecure)",
+              file=sys.stderr)
+        with urllib.request.urlopen(req, timeout=180, context=ssl._create_unverified_context()) as r,                 open(dest, "wb") as f:
             f.write(r.read())
     print(f"fetched {dest.relative_to(ROOT)}")
 
@@ -49,7 +55,11 @@ def sha256(p: Path) -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--who", action="store_true", help="also fetch the restricted WHO Model Formulary 2008")
+    ap.add_argument("--insecure", action="store_true",
+                    help="if TLS verification fails, retry without it (prints a warning; verify checksums after)")
     args = ap.parse_args()
+    global ALLOW_INSECURE
+    ALLOW_INSECURE = args.insecure
     m = yaml.safe_load((ROOT / "data" / "corpus_manifest.yaml").read_text(encoding="utf-8"))
     dl = m["downloads"]
     raw = ROOT / "data" / "raw"

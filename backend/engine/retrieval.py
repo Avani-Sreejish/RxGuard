@@ -294,6 +294,7 @@ def hybrid_search(kb_label: str, query: str, k: int, allowed_rows: list[int] | N
     model is unavailable. `fetch_texts(rows) -> {faiss_row: text}` supplies passages for reranking.
     Raises IndexUnavailable like search() - the caller then uses the FULLTEXT fallback."""
     n = settings.RXGUARD["RETRIEVAL_CANDIDATES"]
+    load_index(kb_label)  # raise IndexUnavailable before paying for an embedding we could not use
     if query_vector is None:
         query_vector = embed([query], "query")[0]
     dense = search(kb_label, query, n, allowed_rows, query_vector=query_vector)

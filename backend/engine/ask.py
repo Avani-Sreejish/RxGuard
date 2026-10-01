@@ -183,9 +183,11 @@ def run_ask(user, session, question: str) -> dict:
                     entry["result"] += f" | {tool1.no_row_wording(kb.label)}"
             elif call.tool == ToolName.guideline_search:
                 ids = [d["drug_id"] for d in _drugs_in(" ; ".join(call.drug_names), kb)] if call.drug_names else []
+                # The retrieval cutoff was calibrated on full questions; a router-shortened keyword query scores
+                # differently and let unrelated passages through, so the search uses the question as asked.
                 doc_types = tool2.route_doc_types(question) or tool2.route_doc_types(call.query or "")
                 res = run_tool("guideline_search", tool2.guideline_search,
-                               dict(kb_id=kb.id, kb_label=kb.label, drug_ids=ids, query=call.query, k=3,
+                               dict(kb_id=kb.id, kb_label=kb.label, drug_ids=ids, query=question, k=3,
                                     require_all=doc_types == ["NLEM"] and bool(ids), doc_types=doc_types),
                                summarize=tool2.summarize)
                 for c in res["chunks"]:
@@ -234,13 +236,15 @@ def run_ask(user, session, question: str) -> dict:
                      "text": f"DDInter records {x['drug_a']} and {x['drug_b']} as a {x['severity']} interaction."}
                     for i, x in enumerate(interactions.values(), start=1)]
             mode = "template"
-            answer = " ".join(c["text"] for c in kept)
-        else:
-            answer = safety.INSUFFICIENT
-            esc("INSUFFICIENT_EVIDENCE", "S1", f"Insufficient evidence retrieved for question: {question[:200]}")
-            mode = "insufficient"
-    else:
-        answer = " ".join(c["text"] for c in kept)
+    if not kept and mode == "llm":
+        # The model ran but none of its claims survived verification: nothing retrieved answers the question.
+        esc("INSUFFICIENT_EVIDENCE", "S1", f"No verified answer for question: {question[:200]}")
+        base.update(claims=[], dropped=dropped, mode="insufficient")
+        _step(latest.id if latest else None, "answer", t3, f"mode=insufficient kept=0 dropped={len(dropped)}")
+        return _finish(session, latest, {**base, "answer": safety.INSUFFICIENT}, cid, budget)
+    answer = " ".join(c["text"] for c in kept) if kept else (
+        "Passages retrieved for this question are shown below as source text. RxGuard has not verified that "
+        "they answer it (no LLM available).")
     base.update(claims=kept, dropped=dropped, mode=mode)
     _step(latest.id if latest else None, "answer", t3, f"mode={mode} kept={len(kept)} dropped={len(dropped)}")
     return _finish(session, latest, {**base, "answer": answer}, cid, budget)
