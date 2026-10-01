@@ -24,7 +24,8 @@ def chunk_card(chunk, score=None, span=""):
     d = chunk.document
     return {"chunk_id": chunk.id, "document": d.title, "doc_type": d.doc_type, "source": d.source,
             "version": d.version, "license": d.license, "url": d.url, "section": chunk.section_path,
-            "page": chunk.page, "text": chunk.text, "text_hash": chunk.text_hash, "score": score,
+            "page": chunk.page, "file_name": getattr(d, "file_name", "") or d.title,
+            "text": chunk.text, "text_hash": chunk.text_hash, "score": score,
             "support_span": span, "label": "SOURCE TEXT (retrieved, not AI-generated)"}
 
 

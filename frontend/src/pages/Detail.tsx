@@ -194,10 +194,7 @@ export default function Detail({ id }: { id: number }) {
                 <div className="claim">
                   <DbFact />
                   <span className="txt">
-                    Interaction recorded in the structured database: <Sev s={f.severity} /> (as recorded) ·{" "}
-                    <span className="mono small">
-                      {f.source} {f.kb_version} · record {f.source_record_id}
-                    </span>
+                    <b>Structured Verification:</b> Interaction verified in database <b>{f.source}</b> (<Sev s={f.severity} />) · Record ID: <code className="mono">{f.source_record_id}</code> · KB: <code>{f.kb_version}</code>
                   </span>
                 </div>
                 {lang !== "en" && translations[lang]?.[f.id] && (
@@ -228,10 +225,55 @@ export default function Detail({ id }: { id: number }) {
                   </div>
                 )}
                 {claimsFor(f).filter((c) => c.source_type === "RAG_CHUNK").map((c) => (
-                  <div className="claim" key={c.claim_id}>
-                    <AiVerified />
-                    <span className="txt">{c.text}</span>
-                    <span className="mono small">{c.claim_id} → chunk {c.chunk?.chunk_id}</span>
+                  <div
+                    className="claim"
+                    key={c.claim_id}
+                    style={{
+                      display: "block",
+                      margin: "8px 0",
+                      padding: "10px 14px",
+                      background: "var(--surface)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius)",
+                    }}
+                  >
+                    <div className="row spread" style={{ marginBottom: 4 }}>
+                      <div className="row" style={{ gap: 6 }}>
+                        <AiVerified />
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{c.text}</span>
+                      </div>
+                      <span className="mono small" style={{ color: "var(--muted)" }}>{c.claim_id}</span>
+                    </div>
+                    {c.chunk && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 11.5,
+                          background: "var(--accent-soft)",
+                          padding: "8px 12px",
+                          borderRadius: "var(--radius)",
+                          borderLeft: "3px solid var(--accent)",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>
+                            📄 <b>Verified Source File:</b> {c.chunk.file_name || c.chunk.document} {c.chunk.page != null ? `· Page ${c.chunk.page}` : ""}
+                          </span>
+                          <span className="badge synth" style={{ fontSize: 9.5 }}>Chunk #{c.chunk.chunk_id}</span>
+                        </div>
+                        {c.chunk.section && (
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                            <b>Section / Guideline Context:</b> {c.chunk.section}
+                          </div>
+                        )}
+                        {c.support_span && (
+                          <div style={{ marginTop: 6, color: "var(--text)" }}>
+                            🔍 <b>Exact Data Used to Verify:</b>{" "}
+                            <mark style={{ padding: "2px 6px", borderRadius: 3, fontWeight: 600 }}>"{c.support_span}"</mark>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {f.evidence_status === "INSUFFICIENT" && (

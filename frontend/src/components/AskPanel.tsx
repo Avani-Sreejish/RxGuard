@@ -10,7 +10,7 @@ interface AskResult {
   dropped: { claim_id: string; reason: string }[];
   tool_trace: { tool: string; args: Record<string, unknown>; status: string; result?: string }[];
   escalations: { reason_code: string; rule_id: string }[];
-  evidence_cards: { chunk_id: number; document: string; section: string; text: string }[];
+  evidence_cards: { chunk_id: number; document: string; section: string; text: string; page?: number | null; file_name?: string }[];
   correlation_id: string;
 }
 
@@ -175,14 +175,62 @@ function AnswerMeta({ p }: { p: Partial<AskResult> }) {
         </div>
       )}
 
-      {!!p.evidence_cards?.length && p.mode !== "llm" && (
-        <div style={{ marginTop: 6 }}>
-          {p.evidence_cards.slice(0, 2).map((c) => (
-            <div key={c.chunk_id} className="evidence">
-              <div className="meta">
-                <b>{c.document}</b> · {c.section} · Chunk #{c.chunk_id}
+      {!!p.evidence_cards?.length && (
+        <div style={{ marginTop: 10 }}>
+          <div
+            style={{
+              fontSize: 10.5,
+              fontWeight: 800,
+              color: "var(--accent)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              marginBottom: 6,
+            }}
+          >
+            📚 Verified Source Citations & Supporting Data ({p.evidence_cards.length}):
+          </div>
+          {p.evidence_cards.map((c) => (
+            <div
+              key={c.chunk_id}
+              className="evidence"
+              style={{
+                marginBottom: 8,
+                padding: "8px 12px",
+                background: "var(--accent-soft)",
+                borderLeft: "3px solid var(--accent)",
+                borderRadius: "var(--radius)",
+              }}
+            >
+              <div
+                className="meta"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 4,
+                }}
+              >
+                <span>
+                  📄 <b>Verified File / Source:</b> {c.document} {c.page ? `· Page ${c.page}` : ""}
+                </span>
+                <span className="badge synth" style={{ fontSize: 9 }}>Chunk #{c.chunk_id}</span>
               </div>
-              <blockquote>{c.text.slice(0, 400)}</blockquote>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
+                <b>Section / Context:</b> {c.section}
+              </div>
+              <blockquote
+                style={{
+                  margin: 0,
+                  padding: "6px 10px",
+                  background: "var(--surface)",
+                  borderRadius: "var(--radius)",
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: "var(--text)",
+                }}
+              >
+                🔍 <b>Verified Quote:</b> "{c.text.slice(0, 360)}{c.text.length > 360 ? "…" : ""}"
+              </blockquote>
             </div>
           ))}
         </div>

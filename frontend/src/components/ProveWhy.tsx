@@ -177,21 +177,100 @@ function ClaimRow({ c }: { c: Claim }) {
 }
 
 export function ChunkCard({ e, span }: { e: EvidenceCard; span?: string }) {
+  const verifiedSpan = span || e.support_span;
   return (
-    <div className="evidence">
-      <div className="meta">
-        <b>{e.document}</b> · {e.section} {e.page ? `· p.${e.page}` : ""} · chunk {e.chunk_id}
-        {e.score != null ? ` · retrieval score ${e.score.toFixed(3)}` : ""}
+    <div
+      className="evidence"
+      style={{
+        borderLeft: "3px solid var(--accent)",
+        background: "var(--accent-soft)",
+        borderRadius: "var(--radius)",
+        padding: "10px 14px",
+        marginTop: 8,
+      }}
+    >
+      <div
+        className="meta"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 6,
+        }}
+      >
+        <div>
+          <span
+            style={{
+              fontSize: 10.5,
+              fontWeight: 800,
+              color: "var(--accent)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              marginRight: 6,
+            }}
+          >
+            📄 Verified Source File:
+          </span>
+          <b style={{ color: "var(--text)", fontSize: 13 }}>{e.file_name || e.document}</b>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          {e.doc_type && <span className="badge synth" style={{ fontSize: 9.5 }}>{e.doc_type}</span>}
+          {e.page != null && <span className="badge esc" style={{ fontSize: 9.5 }}>Page {e.page}</span>}
+          <span className="mono small" style={{ color: "var(--muted)" }}>Chunk #{e.chunk_id}</span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>
+        <b>Section / Policy Context:</b> {e.section}
+        {e.score != null ? ` · Retrieval score: ${e.score.toFixed(3)}` : ""}
         {e.retrieval_mode === "fulltext" ? " · FULLTEXT (degraded)" : ""}
         {e.matched_via && Object.keys(e.matched_via).length > 0 && (
-          <div>
-            matched: {Object.entries(e.matched_via).map(([d, v]) => `${d} (${v.replace("class:", "via class term “") + (v.startsWith("class:") ? "”" : "")})`).join(" · ")}
-          </div>
+          <span style={{ marginLeft: 8 }}>
+            (matched: {Object.entries(e.matched_via).map(([d, v]) => `${d} via “${v}”`).join(" · ")})
+          </span>
         )}
       </div>
-      <blockquote>
-        <Highlight text={e.text} span={span || e.support_span} />
-      </blockquote>
+
+      {verifiedSpan ? (
+        <div
+          style={{
+            margin: "6px 0",
+            padding: "8px 10px",
+            background: "rgba(59, 130, 246, 0.12)",
+            borderRadius: "var(--radius)",
+            border: "1px solid rgba(59, 130, 246, 0.35)",
+          }}
+        >
+          <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--accent)", marginBottom: 3 }}>
+            🔍 EXACT DATA USED TO VERIFY (CITED TEXT):
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.5 }}>
+            "{verifiedSpan}"
+          </div>
+        </div>
+      ) : null}
+
+      <details style={{ marginTop: 6, fontSize: 12, cursor: "pointer" }}>
+        <summary style={{ color: "var(--muted)", fontWeight: 600, fontSize: 11 }}>
+          View full source passage ({e.text.length} chars)
+        </summary>
+        <blockquote
+          style={{
+            marginTop: 6,
+            padding: "8px 10px",
+            background: "var(--surface)",
+            borderRadius: "var(--radius)",
+            maxHeight: 180,
+            overflow: "auto",
+            fontSize: 12,
+            lineHeight: 1.55,
+          }}
+        >
+          <Highlight text={e.text} span={verifiedSpan} />
+        </blockquote>
+      </details>
     </div>
   );
 }
