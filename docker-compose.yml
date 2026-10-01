@@ -1,0 +1,58 @@
+# Three services: web (Django + gunicorn, FAISS in-process), mysql, frontend (nginx: static build + /api proxy).
+# Optional HTTPS: `docker compose --profile https up -d` adds Caddy (automatic TLS for $DOMAIN).
+services:
+  mysql:
+    image: mysql:8.4
+    # Single instance, no replication: binary log off (no point-in-time recovery - back up with mysqldump).
+    # InnoDB stays fully durable (innodb_flush_log_at_trx_commit=1, the default).
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--disable-log-bin",
+              "--innodb-redo-log-capacity=536870912", "--innodb-buffer-pool-size=536870912"]
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-rxguard}
+      MYSQL_USER: ${MYSQL_USER:-rxguard}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    env_file: .env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      INDEX_DIR: /app/data/index
+    volumes:
+      - index-data:/app/data/index
+      - ./data/raw:/app/data/raw:ro        # raw sources for `make seed` (fetched by scripts/download_data.py)
+    depends_on:
+      mysql: {condition: service_healthy}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args: {NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org}"}
+    ports: ["${HTTP_PORT:-8080}:80"]
+    depends_on:
+      web: {condition: service_healthy}
+    restart: unless-stopped
+
+  caddy:
+    profiles: [https]
+    image: caddy:2.8-alpine
+    ports: ["80:80", "443:443"]
+    environment: {DOMAIN: "${DOMAIN:-localhost}"}  # set DOMAIN in .env for a real certificate
+    volumes: [./deploy/Caddyfile:/etc/caddy/Caddyfile:ro, caddy-data:/data]
+    depends_on: [frontend]
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  index-data:
+  caddy-data:

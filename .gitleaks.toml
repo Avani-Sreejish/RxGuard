@@ -1,0 +1,5 @@
+# scripts/dev.env holds dev-only credentials for the local throwaway MySQL container, documented in the README.
+[extend]
+useDefault = true
+[allowlist]
+paths = ['''scripts/dev\.env''']

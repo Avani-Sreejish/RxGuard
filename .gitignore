@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/raw/
+data/index/
+data/processed/
+backend/db.sqlite3
+frontend/node_modules/
+frontend/dist/
+loadtest/results/*.html
+.pytest_cache/
+frontend/*.tsbuildinfo

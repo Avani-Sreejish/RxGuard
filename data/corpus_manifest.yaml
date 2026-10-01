@@ -1,0 +1,82 @@
+# Corpus + structured-data manifest. `make seed` / `python manage.py seed` reads this file.
+# Every source is recorded in the data_sources table with its licence text, URL, retrieval date and SHA-256.
+# Licence fields quote what the document itself says; "VERIFY" marks anything the team has not confirmed.
+
+ddinter:
+  name: DDInter
+  version: "1.0 bulk download (8 ATC-category CSVs)"
+  url: http://ddinter.scbdd.com/download/
+  files: [ddinter_downloads_code_A.csv, ddinter_downloads_code_B.csv, ddinter_downloads_code_D.csv,
+          ddinter_downloads_code_H.csv, ddinter_downloads_code_L.csv, ddinter_downloads_code_P.csv,
+          ddinter_downloads_code_R.csv, ddinter_downloads_code_V.csv]
+  license: >-
+    No licence text on the download page (checked 2026-09-30). Described by its authors as freely accessible
+    for academic use. Treated as academic / non-commercial. VERIFY before any use beyond the hackathon.
+  notes: >-
+    Bulk file columns: DDInterID_A, Drug_A, DDInterID_B, Drug_B, Level. No mechanism text and no per-row
+    record ID; RxGuard uses the ordered DDInter drug-ID pair as the source record ID.
+
+documents:
+  - file: nlem2022.pdf
+    title: National List of Essential Medicines 2022
+    doc_type: NLEM
+    source: MoHFW / CDSCO
+    version: "2022"
+    url: https://qps.nhsrcindia.org/sites/default/files/2022-09/nlem2022.pdf
+    license: >-
+      Government of India publication (MoHFW). No explicit reuse licence in the document. Used as a
+      public reference document; VERIFY terms before redistribution.
+  - {file: icmr_stw_hypertension_adults.pdf, title: "ICMR STW: Hypertension in Adults", doc_type: ICMR_STW}
+  - {file: icmr_stw_cardiology_all.pdf, title: "ICMR STW: Cardiology (Volume)", doc_type: ICMR_STW,
+     license_override: "© DHR and ICMR. All rights reserved (per document). Used as a public reference for the hackathon; VERIFY."}
+  - {file: icmr_stw_diabetes_type2.pdf, title: "ICMR STW: Type 2 Diabetes Mellitus", doc_type: ICMR_STW}
+  - {file: icmr_stw_hypothyroidism.pdf, title: "ICMR STW: Hypothyroidism", doc_type: ICMR_STW}
+  - {file: icmr_stw_gi_bleed_a.pdf, title: "ICMR STW: Acute Gastrointestinal Bleed in Adults (Part A)", doc_type: ICMR_STW}
+  - {file: icmr_stw_gi_bleed_b.pdf, title: "ICMR STW: Acute Gastrointestinal Bleed in Adults (Part B)", doc_type: ICMR_STW}
+  - {file: icmr_stw_stroke.pdf, title: "ICMR STW: Stroke", doc_type: ICMR_STW}
+  - {file: icmr_stw_ckd.pdf, title: "ICMR STW: Chronic Kidney Disease", doc_type: ICMR_STW}
+  - {file: icmr_stw_uti.pdf, title: "ICMR STW: Urinary Tract Infection", doc_type: ICMR_STW}
+  - {file: icmr_stw_fever_children.pdf, title: "ICMR STW: Fever in Children", doc_type: ICMR_STW}
+  - {file: icmr_stw_epilepsy.pdf, title: "ICMR STW: Epilepsy", doc_type: ICMR_STW}
+  - {file: icmr_stw_depression.pdf, title: "ICMR STW: Depression", doc_type: ICMR_STW}
+  - {file: icmr_stw_acute_resp_infections.pdf, title: "ICMR STW: Acute Respiratory Infections", doc_type: ICMR_STW}
+  # OPT-IN ONLY (set CORPUS_INCLUDE_RESTRICTED=1). The document states "All rights reserved" and that permission
+  # is required even for non-commercial distribution. Not loaded by default.
+  - file: who_model_formulary_2008.pdf
+    title: WHO Model Formulary 2008
+    doc_type: WHO
+    source: World Health Organization
+    version: "2008 (ISBN 978 92 4 154765 9)"
+    url: https://www.who.int/publications/i/item/9789241547659
+    restricted: true
+    license: >-
+      © World Health Organization 2009. All rights reserved. Requests for permission to reproduce, whether for
+      sale or noncommercial distribution, go to WHO Press. NOT cleared for this project.
+
+icmr_defaults:
+  source: ICMR / DHR (MoHFW)
+  version: "STW (downloaded 2026-09-30)"
+  url: https://www.icmr.gov.in/standard-treatment-workflows-stws
+  license: >-
+    © Indian Council of Medical Research and Department of Health Research, MoHFW, Government of India
+    (per document). No explicit reuse licence. Used as a public reference for the hackathon; VERIFY terms.
+
+downloads:
+  # `python scripts/download_data.py` fetches these into data/raw/ (raw data is not committed).
+  ddinter_base: http://ddinter.scbdd.com/static/media/download/
+  icmr_base: https://www.icmr.gov.in/icmrobject/uploads/STWs/
+  icmr_files:
+    icmr_stw_hypertension_adults.pdf: 1778941063_hypertensioninadults_final.pdf
+    icmr_stw_cardiology_all.pdf: 1771492083_cardiology_all.pdf
+    icmr_stw_diabetes_type2.pdf: 1726567245_diabetes_mellitus_type_2.pdf
+    icmr_stw_hypothyroidism.pdf: 1726567243_hypothyroidism.pdf
+    icmr_stw_gi_bleed_a.pdf: 1726567564_gastrointestinal_bleed_part_a.pdf
+    icmr_stw_gi_bleed_b.pdf: 1726567564_gastrointestinal_bleed_part_b.pdf
+    icmr_stw_stroke.pdf: 1725952342_neurology_stroke.pdf
+    icmr_stw_ckd.pdf: 1784807344_chronickidneydisease-updated.pdf
+    icmr_stw_uti.pdf: 1784807340_uti.pdf
+    icmr_stw_fever_children.pdf: 1725952338_paediatrics_fever_in_children.pdf
+    icmr_stw_epilepsy.pdf: 1725952345_neurology_epilepsy.pdf
+    icmr_stw_depression.pdf: 1725952332_psychiatry_depression.pdf
+    icmr_stw_acute_resp_infections.pdf: 1725963734_pulmonology_acute_respiratory_infections.pdf
+  nlem: https://qps.nhsrcindia.org/sites/default/files/2022-09/nlem2022.pdf

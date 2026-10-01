@@ -1,0 +1,9 @@
+.venv
+.git
+frontend/node_modules
+frontend/dist
+data/raw
+data/index
+data/processed
+**/__pycache__
+backend/.test-no-index

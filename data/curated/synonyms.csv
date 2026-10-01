@@ -1,0 +1,58 @@
+alias,generic_name,alias_type,note
+aspirin,Acetylsalicylic acid,synonym,INN/BAN common name
+asa,Acetylsalicylic acid,abbreviation,
+paracetamol,Acetaminophen,synonym,INN name used in India
+pcm,Acetaminophen,abbreviation,
+albuterol,Salbutamol,synonym,USAN name
+frusemide,Furosemide,synonym,former BAN
+glibenclamide,Glyburide,synonym,INN name used in India
+adrenaline,Epinephrine,synonym,BAN
+noradrenaline,Norepinephrine,synonym,BAN
+lignocaine,Lidocaine,synonym,former BAN
+thyroxine,Levothyroxine,synonym,
+l-thyroxine,Levothyroxine,synonym,
+amoxycillin,Amoxicillin,synonym,former BAN
+rifampin,Rifampicin,synonym,USAN name
+chlorphenamine,Chlorpheniramine,synonym,INN name
+cpm,Chlorpheniramine,abbreviation,
+hctz,Hydrochlorothiazide,abbreviation,
+ismn,Isosorbide mononitrate,abbreviation,
+isdn,Isosorbide dinitrate,abbreviation,
+mtx,Methotrexate,abbreviation,
+glyceryl trinitrate,Nitroglycerin,synonym,BAN
+gtn,Nitroglycerin,abbreviation,
+ntg,Nitroglycerin,abbreviation,
+aciclovir,Acyclovir,synonym,INN name
+sodium valproate,Valproic acid,synonym,salt form mapped to parent molecule
+valproate,Valproic acid,synonym,
+ferrous sulphate,Ferrous sulfate anhydrous,synonym,
+ferrous sulfate,Ferrous sulfate anhydrous,synonym,
+kcl,Potassium chloride,abbreviation,
+potassium chloride,Potassium chloride,synonym,
+lithium,Lithium carbonate,synonym,
+phenobarbitone,Phenobarbital,synonym,BAN
+thiopentone,Thiopental,synonym,BAN
+desferrioxamine,Deferoxamine,synonym,BAN
+glycopyrrolate,Glycopyrronium,synonym,USAN salt name
+n-acetylcysteine,Acetylcysteine,synonym,
+magnesium sulphate,Magnesium sulfate,synonym,BAN spelling
+cytosine arabinoside,Cytarabine,synonym,
+5-fluorouracil,Fluorouracil,synonym,
+6-mercaptopurine,Mercaptopurine,synonym,
+actinomycin d,Dactinomycin,synonym,
+calcium folinate,Leucovorin,synonym,INN salt name
+folinic acid,Leucovorin,synonym,
+sodium nitroprusside,Nitroprusside,synonym,
+5-aminosalicylic acid,Mesalazine,synonym,
+mesalamine,Mesalazine,synonym,USAN
+clomiphene,Clomifene,synonym,USAN
+clomiphene citrate,Clomifene,synonym,
+para-aminosalicylic acid,Aminosalicylic acid,synonym,
+d-penicillamine,Penicillamine,synonym,
+phenoxymethyl penicillin,Phenoxymethylpenicillin,synonym,
+penicillin v,Phenoxymethylpenicillin,synonym,
+all-trans retinoic acid,Tretinoin,synonym,
+methylthioninium chloride,Methylene blue,synonym,INN
+zinc sulphate,Zinc sulfate,synonym,BAN spelling
+ispaghula,Plantago seed,synonym,psyllium
+insulin soluble,Insulin human,synonym,regular (soluble) human insulin
