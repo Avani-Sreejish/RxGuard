@@ -1,14 +1,20 @@
-"""Embeddings + FAISS index (spec section 11.2).
+"""Embeddings + FAISS index (spec section 11.2), BM25 keyword index and cross-encoder reranker.
 
 Vectors: intfloat/multilingual-e5-base with "passage: " / "query: " prefixes, L2-normalised,
 stored in a FAISS IndexFlatIP (exact search - fast enough at this corpus size).
 Row i of the index is corpus_chunks.faiss_row == i. The index is versioned with the KB.
+
+Hybrid search: dense (FAISS) and keyword (BM25, built in memory from corpus_chunks) rankings are fused with
+Reciprocal Rank Fusion; the top candidates can then be re-scored by a cross-encoder (RETRIEVAL_RERANK=1).
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import threading
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -84,7 +90,9 @@ def warm_up():
     from engine import normalize
 
     try:
-        import anthropic  # noqa: F401 - the first import costs seconds; pay it at start, not in a request
+        # the first SDK import costs seconds; pay it at start, not in a request
+        import anthropic  # noqa: F401
+        from google import genai  # noqa: F401
 
         embed(["warm up"], "query")  # model load does not depend on a KB existing yet
         from engine.tools.base import _pool
@@ -96,6 +104,9 @@ def warm_up():
         if kb:
             normalize.get_alias_index(kb)
             load_index(kb.label)
+            bm25_index(kb.label)
+            if settings.RXGUARD["RETRIEVAL_RERANK"]:
+                rerank("warm up", ["warm up"])
         log.info("retrieval_warm", extra={"kb_version": kb.label if kb else None})
     except Exception as e:  # noqa: BLE001 - readiness reports it; FULLTEXT fallback still works
         log.warning("retrieval_warm_failed", extra={"reason": str(e)[:200]})
@@ -118,6 +129,7 @@ def save_index(kb_label: str, vectors: np.ndarray, chunk_ids: list[int]):
         "rows": len(chunk_ids), "chunk_ids": chunk_ids}))
     with _lock:
         _indexes.pop(kb_label, None)
+        _bm25.pop(kb_label, None)
 
 
 def load_index(kb_label: str):
@@ -163,3 +175,146 @@ def search(kb_label: str, query: str, k: int, allowed_rows: list[int] | None = N
     else:
         scores, rows = idx.search(q, k)
     return [(int(r), float(s)) for r, s in zip(rows[0], scores[0]) if r >= 0]
+
+
+def dense_scores(kb_label: str, rows: list[int], query_vector) -> dict[int, float]:
+    """Exact inner-product scores of the query against specific FAISS rows (for candidates found only by BM25)."""
+    idx, _meta = load_index(kb_label)
+    q = np.asarray(query_vector, dtype="float32")
+    return {r: float(np.dot(idx.reconstruct(int(r)), q)) for r in rows}
+
+
+# ---- BM25 keyword index -----------------------------------------------------------------------------------
+# Built lazily per KB version from corpus_chunks (faiss_row -> text). ~530 chunks: milliseconds to build.
+
+_TOKEN = re.compile(r"[a-z0-9][a-z0-9\-]+")
+_STOP = frozenset("""a an and are as at be by for from has have in is it its of on or that the this to was were
+which with what when who how does do should can may their there these those than then into also other""".split())
+_BM25_K1, _BM25_B = 1.5, 0.75
+_bm25: dict[str, dict] = {}
+
+
+def tokenize(text: str) -> list[str]:
+    return [t for t in _TOKEN.findall((text or "").lower()) if t not in _STOP]
+
+
+def _build_bm25(kb_label: str) -> dict:
+    from api.models import CorpusChunk
+
+    rows = list(CorpusChunk.objects.filter(document__kb_version__label=kb_label, faiss_row__isnull=False)
+                .values_list("faiss_row", "document__title", "section_path", "text"))
+    tfs, lens, df = {}, {}, Counter()
+    for row, title, section, text in rows:
+        toks = tokenize(f"{title} {section} {text}")
+        tfs[row] = Counter(toks)
+        lens[row] = len(toks)
+        df.update(set(toks))
+    n = max(1, len(rows))
+    idf = {t: math.log(1 + (n - f + 0.5) / (f + 0.5)) for t, f in df.items()}
+    return {"tf": tfs, "len": lens, "idf": idf, "avgdl": (sum(lens.values()) / n) or 1.0}
+
+
+def bm25_index(kb_label: str) -> dict:
+    with _lock:
+        if kb_label in _bm25:
+            return _bm25[kb_label]
+    built = _build_bm25(kb_label)
+    with _lock:
+        _bm25[kb_label] = built
+    return built
+
+
+def bm25_search(kb_label: str, query: str, k: int, allowed_rows: list[int] | None = None) -> list[tuple[int, float]]:
+    """[(faiss_row, bm25 score)] best-first; rows with no query term are not returned."""
+    ix = bm25_index(kb_label)
+    terms = [t for t in dict.fromkeys(tokenize(query)) if t in ix["idf"]]
+    if not terms:
+        return []
+    candidates = ix["tf"].keys() if allowed_rows is None else [r for r in allowed_rows if r in ix["tf"]]
+    scored = []
+    for r in candidates:
+        tf, dl = ix["tf"][r], ix["len"][r]
+        s = 0.0
+        for t in terms:
+            f = tf.get(t)
+            if f:
+                s += ix["idf"][t] * f * (_BM25_K1 + 1) / (f + _BM25_K1 * (1 - _BM25_B + _BM25_B * dl / ix["avgdl"]))
+        if s > 0:
+            scored.append((r, s))
+    scored.sort(key=lambda x: -x[1])
+    return scored[:k]
+
+
+def rrf_fuse(*rankings: list[tuple[int, float]], k: int = 60) -> list[tuple[int, float]]:
+    """Reciprocal Rank Fusion: score(row) = sum over rankings of 1 / (k + rank). Best-first."""
+    fused: dict[int, float] = {}
+    for ranking in rankings:
+        for rank, (row, _score) in enumerate(ranking, start=1):
+            fused[row] = fused.get(row, 0.0) + 1.0 / (k + rank)
+    return sorted(fused.items(), key=lambda x: -x[1])
+
+
+# ---- Cross-encoder reranker ---------------------------------------------------------------------------------
+
+class RerankerUnavailable(Exception):
+    pass
+
+
+_reranker = None
+_rerank_lock = threading.Lock()  # same tokenizer thread-safety issue as the embedder
+
+
+def get_reranker():
+    global _reranker
+    with _lock:
+        if _reranker is None:
+            try:
+                from sentence_transformers import CrossEncoder
+                _reranker = CrossEncoder(settings.RXGUARD["RERANK_MODEL"], device="cpu", max_length=512)
+            except Exception as e:  # noqa: BLE001 - missing package or model: callers fall back to RRF order
+                raise RerankerUnavailable(str(e)) from e
+        return _reranker
+
+
+def rerank(query: str, texts: list[str]) -> list[float]:
+    """Cross-encoder relevance of each text to the query, squashed to 0..1 with a sigmoid."""
+    if not texts:
+        return []
+    model = get_reranker()
+    with _rerank_lock:
+        logits = model.predict([(query, t) for t in texts], batch_size=16, show_progress_bar=False)
+    return [float(1.0 / (1.0 + math.exp(-float(x)))) for x in np.asarray(logits).reshape(-1)]
+
+
+def hybrid_search(kb_label: str, query: str, k: int, allowed_rows: list[int] | None = None,
+                  query_vector=None, fetch_texts=None) -> list[dict]:
+    """Dense + BM25 candidates fused with RRF, optionally re-scored by the cross-encoder.
+
+    Returns best-first [{"row", "dense", "rrf", "rerank"}]; "rerank" is None when reranking is off or the
+    model is unavailable. `fetch_texts(rows) -> {faiss_row: text}` supplies passages for reranking.
+    Raises IndexUnavailable like search() - the caller then uses the FULLTEXT fallback."""
+    n = settings.RXGUARD["RETRIEVAL_CANDIDATES"]
+    if query_vector is None:
+        query_vector = embed([query], "query")[0]
+    dense = search(kb_label, query, n, allowed_rows, query_vector=query_vector)
+    try:
+        sparse = bm25_search(kb_label, query, n, allowed_rows)
+    except Exception as e:  # noqa: BLE001 - keyword ranking is an improvement, never a dependency
+        log.warning("bm25_failed", extra={"reason": str(e)[:200]})
+        sparse = []
+    fused = rrf_fuse(dense, sparse)[: settings.RXGUARD["RERANK_CANDIDATES"]]
+    dense_map = dict(dense)
+    missing = [r for r, _ in fused if r not in dense_map]
+    if missing:
+        dense_map.update(dense_scores(kb_label, missing, query_vector))
+    out = [{"row": r, "dense": dense_map[r], "rrf": s, "rerank": None} for r, s in fused]
+    if out and settings.RXGUARD["RETRIEVAL_RERANK"] and fetch_texts is not None:
+        try:
+            texts = fetch_texts([c["row"] for c in out])
+            scores = rerank(query, [texts.get(c["row"], "") for c in out])
+            for c, s in zip(out, scores):
+                c["rerank"] = s
+            out.sort(key=lambda c: -c["rerank"])
+        except RerankerUnavailable as e:
+            log.warning("reranker_unavailable", extra={"reason": str(e)[:200]})
+    return out

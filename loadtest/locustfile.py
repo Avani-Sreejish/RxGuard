@@ -2,7 +2,7 @@
 
 Run A  /check, 20 users, 5 min, 2-8 drug synthetic prescriptions:
     locust -f loadtest/locustfile.py --headless -u 20 -r 5 -t 5m --host $HOST --csv loadtest/results/run_a CheckUser
-Run B  /explain with the real LLM, 3-5 users (needs ANTHROPIC_API_KEY on the server):
+Run B  /explain with the real LLM, 3-5 users (needs GEMINI_API_KEY or ANTHROPIC_API_KEY on the server):
     locust -f loadtest/locustfile.py --headless -u 4 -r 1 -t 5m --host $HOST --csv loadtest/results/run_b ExplainUser
 Run C  /explain with the mocked LLM (server started with LLM_MOCK_SLEEP_MS=<median>), 20 users:
     locust -f loadtest/locustfile.py --headless -u 20 -r 5 -t 5m --host $HOST --csv loadtest/results/run_c ExplainUser

@@ -37,7 +37,7 @@ from rest_framework.test import APIClient  # noqa: E402
 
 from api.models import (CorpusChunk, Drug, DrugInteraction, EvaluationResult, EvaluationRun, KbVersion,  # noqa: E402
                         LlmCall, RequestLog)
-from engine import prompts, safety, verifier  # noqa: E402
+from engine import llm_gateway, prompts, safety, verifier  # noqa: E402
 from engine.tools import guideline_search  # noqa: E402
 
 TARGETS = {"A": ("100% precision and recall", 1.0), "B": (">=90% of displayed claims supported", 0.9),
@@ -58,7 +58,7 @@ class Runner:
         self.c.force_authenticate(self.user)
         self.results: list[dict] = []
         self.cids: list[str] = []
-        self.llm_available = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        self.llm_available = llm_gateway.configured()
         self.label_rows: list[dict] = []
         from engine.retrieval import warm_up
         warm_up()  # same as the web process does at start (rxguard/wsgi.py)
@@ -383,28 +383,45 @@ def summarize(runner: Runner) -> dict:
               "pydantic_retries": LlmCall.objects.filter(correlation_id__in=runner.cids, status="schema_error").count(),
               "fallback_activations": LlmCall.objects.filter(correlation_id__in=runner.cids).exclude(status="ok").count()}
     calls = LlmCall.objects.filter(correlation_id__in=runner.cids)
-    per = {}
-    for c in calls.values("correlation_id", "est_cost_usd"):
+    per, tok = {}, {}
+    for c in calls.values("correlation_id", "est_cost_usd", "input_tokens", "output_tokens"):
         per[c["correlation_id"]] = per.get(c["correlation_id"], 0) + float(c["est_cost_usd"])
+        tok[c["correlation_id"]] = tok.get(c["correlation_id"], 0) + c["input_tokens"] + c["output_tokens"]
+    priced = llm_gateway.prices()
+    used_models = set(calls.filter(status="ok").values_list("model", flat=True)) - {"mock", "(simulated)"}
     q = [c for c in reqs.filter(endpoint__in=["/api/v1/check", "/api/v1/explain", "/api/v1/ask"],
                                 status_code__lt=400).values_list("correlation_id", flat=True)]
     costs = [per.get(c, 0.0) for c in q]
     s["I"] = {"queries": len(q), "mean_usd": round(statistics.mean(costs), 6) if costs else None,
               "p95_usd": pct(costs, 95), "zero_token_share": round(sum(1 for c in q if c not in per) / len(q), 3) if q else None,
-              "real_llm_calls": calls.exclude(model="(simulated)").exclude(status="api_error").count()}
+              "real_llm_calls": calls.exclude(model="(simulated)").exclude(status="api_error").count(),
+              "mean_tokens": round(statistics.mean(tok.get(c, 0) for c in q), 1) if q else None,
+              "unpriced_models": sorted(m for m in used_models if m not in priced)}
     if runner.retrieval:
         s["C_detail"] = {"mean_recall5": round(statistics.mean(r["recall5"] for r in runner.retrieval), 3),
                          "mean_mrr": round(statistics.mean(r["mrr"] for r in runner.retrieval), 3)}
     return s
 
 
+def _retrieval_config() -> str:
+    r = settings.RXGUARD
+    if not r["RETRIEVAL_HYBRID"]:
+        return f"FAISS only, cutoff {r['RETRIEVAL_MIN_SCORE']}"
+    if r["RETRIEVAL_RERANK"]:
+        return (f"hybrid FAISS + BM25 (RRF) + cross-encoder `{r['RERANK_MODEL']}`, top {r['RERANK_CANDIDATES']} "
+                f"reranked, cutoff {r['RERANK_MIN_SCORE']}")
+    return f"hybrid FAISS + BM25 (RRF), dense cutoff {r['RETRIEVAL_MIN_SCORE']} (reranker off)"
+
+
 def write_report(runner: Runner, s: dict, run: EvaluationRun, out: Path):
     L = []
-    llm = "AVAILABLE" if runner.llm_available else "NOT AVAILABLE (no ANTHROPIC_API_KEY) - LLM paths ran in fallback/template mode"
+    llm = "AVAILABLE" if runner.llm_available else "NOT AVAILABLE (no API key for the configured models) - LLM paths ran in fallback/template mode"
     L += ["# RxGuard Evaluation Report", "",
           f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} by `eval/run.py` - evaluation run #{run.id}.", "",
           f"- KB version: **{runner.kb.label}** · git: `{run.git_sha or 'n/a'}` · prompts: `{run.prompt_version}`",
-          f"- LLM: **{llm}**",
+          f"- LLM: **{llm}** · chain: `{settings.RXGUARD['LLM_PRIMARY_MODEL']}` -> "
+          f"`{settings.RXGUARD['LLM_FALLBACK_MODEL']}` -> template",
+          f"- Retrieval: {_retrieval_config()}",
           f"- Environment: in-process Django test client against the seeded database ({settings.DATABASES['default']['ENGINE'].split('.')[-1]}), "
           f"{len(runner.cids)} requests in {runner.elapsed:.1f} s. Latency here is NOT the load test (see loadtest/REPORT.md).",
           "", "Only measured numbers are reported. Anything not measured says **NOT MEASURED** and why.", "",
@@ -439,7 +456,9 @@ def write_report(runner: Runner, s: dict, run: EvaluationRun, out: Path):
     L.append(f"| I. Cost per query | {TARGETS['I'][0]} | mean ${i['mean_usd']} · P95 ${i['p95_usd']} · zero-token share "
              f"{i['zero_token_share']} over {i['queries']} queries; real LLM calls {i['real_llm_calls']}; cap "
              f"{settings.RXGUARD['LLM_MAX_CALLS_PER_QUERY']} calls / {settings.RXGUARD['LLM_MAX_INPUT_TOKENS_PER_QUERY']} "
-             f"input tokens per query | reported |")
+             f"input tokens per query; mean tokens/query {i['mean_tokens']}"
+             + (f"; **no price configured for {', '.join(i['unpriced_models'])} - USD figures understate cost "
+                f"(set LLM_PRICES)**" if i["unpriced_models"] else "") + " | reported |")
     L += ["", "Citation correctness (B) also requires two human labelers on every displayed claim (spec 21). "
           "`eval/labels_todo.csv` lists the claims to label; human agreement is NOT MEASURED until that sheet is filled in.", ""]
     L += ["## Per-case results", "", "| Case | Metric | Result | Detail |", "|---|---|---|---|"]
