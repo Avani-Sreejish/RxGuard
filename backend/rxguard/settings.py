@@ -8,6 +8,14 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BASE_DIR.parent
 
+env_file = REPO_ROOT / ".env"
+if env_file.exists():
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
 
 def env(name, default=None):
     return os.environ.get(name, default)
@@ -141,6 +149,15 @@ RXGUARD = {
     "FUZZY_CANDIDATE": float(env("FUZZY_CANDIDATE", "80")),
     "SUPPORT_THRESHOLD": float(env("SUPPORT_THRESHOLD", "0.6")),
     "RETRIEVAL_MIN_SCORE": float(env("RETRIEVAL_MIN_SCORE", "0.81")),  # calibrated: scripts/calibrate_retrieval.py
+    # Hybrid retrieval: FAISS + BM25 fused with RRF (ranking only - the dense cutoff above still decides).
+    "RETRIEVAL_HYBRID": env_bool("RETRIEVAL_HYBRID", True),
+    "RETRIEVAL_CANDIDATES": int(env("RETRIEVAL_CANDIDATES", "20")),  # per ranker, before fusion
+    # Cross-encoder rerank of the fused top candidates. Off until RERANK_MIN_SCORE is calibrated on the real
+    # corpus (scripts/calibrate_retrieval.py prints both score distributions); then it replaces the dense cutoff.
+    "RETRIEVAL_RERANK": env_bool("RETRIEVAL_RERANK", False),
+    "RERANK_MODEL": env("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"),
+    "RERANK_CANDIDATES": int(env("RERANK_CANDIDATES", "8")),
+    "RERANK_MIN_SCORE": float(env("RERANK_MIN_SCORE", "0.5")),  # placeholder: calibrate before enabling
     "CHUNKS_PER_FINDING": 3,
     "EXPLAIN_MAX_FINDINGS": int(env("EXPLAIN_MAX_FINDINGS", "10")),
     "RETRIEVAL_BUDGET_S": float(env("RETRIEVAL_BUDGET_S", "6")),  # per /explain request, all findings
@@ -149,14 +166,19 @@ RXGUARD = {
                         "guideline_search": float(env("TOOL2_TIMEOUT_S", "1")),
                         "escalate": float(env("TOOL3_TIMEOUT_S", "2"))},
     # LLM gateway. Model IDs and prices are configuration, never hardcoded in logic.
-    "LLM_PRIMARY_MODEL": env("LLM_PRIMARY_MODEL", "claude-opus-5-5"),
-    "LLM_FALLBACK_MODEL": env("LLM_FALLBACK_MODEL", "claude-haiku-4-5"),
+    # "gemini-*" models use GEMINI_API_KEY, others ANTHROPIC_API_KEY; the two can be mixed in the chain.
+    # Measured 2026-10-01 on the free tier: flash-lite 0.7-1.2 s per call; gemini-3.5-flash often >10 s or 503.
+    "LLM_PRIMARY_MODEL": env("LLM_PRIMARY_MODEL", "gemini-3.5-flash-lite"),
+    "LLM_FALLBACK_MODEL": env("LLM_FALLBACK_MODEL", "gemini-3.5-flash"),
+    "LLM_GEMINI_THINKING_LEVEL": env("LLM_GEMINI_THINKING_LEVEL", "low"),  # "" leaves the model default
     "LLM_TIMEOUT_S": float(env("LLM_TIMEOUT_S", "10")),
     "LLM_MAX_CALLS_PER_QUERY": int(env("LLM_MAX_CALLS_PER_QUERY", "3")),
     "LLM_MAX_INPUT_TOKENS_PER_QUERY": int(env("LLM_MAX_INPUT_TOKENS_PER_QUERY", "6000")),
     # Thinking tokens count toward max_tokens on the primary model, so this is above the spec's 800 example.
     "LLM_MAX_OUTPUT_TOKENS_PER_CALL": int(env("LLM_MAX_OUTPUT_TOKENS_PER_CALL", "1500")),
     # USD per 1M tokens, "model=input:output;model=input:output". Copy from the provider's pricing page.
+    # Gemini prices are not set by default: copy them from the provider's pricing page into .env.
+    # An unpriced model is logged with cost 0 and flagged in the eval report.
     "LLM_PRICES": env("LLM_PRICES", "claude-opus-5-5=4.00:20.00;claude-haiku-4-5=1.00:5.00"),
     "INDEX_DIR": Path(env("INDEX_DIR", str(REPO_ROOT / "data" / "index"))),
     "EMBEDDING_MODEL": env("EMBEDDING_MODEL", "intfloat/multilingual-e5-base"),

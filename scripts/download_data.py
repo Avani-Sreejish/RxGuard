@@ -17,14 +17,28 @@ ROOT = Path(__file__).resolve().parent.parent
 UA = {"User-Agent": "Mozilla/5.0 (RxGuard data fetch)"}
 
 
+import ssl
+
+try:
+    import certifi
+    SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    SSL_CTX = ssl._create_unverified_context()
+
+
 def fetch(url: str, dest: Path):
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 0:
         print(f"exists  {dest.relative_to(ROOT)}")
         return
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=180) as r, open(dest, "wb") as f:
-        f.write(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=180, context=SSL_CTX) as r, open(dest, "wb") as f:
+            f.write(r.read())
+    except urllib.error.URLError:
+        unverified_ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=180, context=unverified_ctx) as r, open(dest, "wb") as f:
+            f.write(r.read())
     print(f"fetched {dest.relative_to(ROOT)}")
 
 

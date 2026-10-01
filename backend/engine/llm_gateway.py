@@ -3,6 +3,9 @@
 Chain (spec 4.2): primary model (1 retry on schema failure, with the validation error)
 -> fallback model (same) -> LlmUnavailable, and the caller switches to template mode.
 Raw LLM text is never returned to callers - only validated Pydantic objects.
+
+Providers are chosen per model ID: "gemini-*" -> Google Gemini (GEMINI_API_KEY), anything else -> Anthropic
+(ANTHROPIC_API_KEY). Both use JSON-schema structured output and the same validation, cap and logging.
 """
 from __future__ import annotations
 
@@ -57,13 +60,49 @@ def estimate_cost(model: str, in_tok: int, out_tok: int) -> Decimal:
     return (Decimal(in_tok) * p[0] + Decimal(out_tok) * p[1]) / Decimal(1_000_000)
 
 
+def provider(model: str) -> str:
+    return "gemini" if model.startswith("gemini") else "anthropic"
+
+
+def _gemini_key() -> str | None:
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+
+
+def configured() -> bool:
+    """True if at least one model in the chain has an API key (used by readiness and the eval report)."""
+    keys = {"anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")), "gemini": bool(_gemini_key())}
+    return any(keys[provider(m)] for m in (settings.RXGUARD["LLM_PRIMARY_MODEL"],
+                                           settings.RXGUARD["LLM_FALLBACK_MODEL"]))
+
+
+class _KeyMissing(Exception):
+    pass
+
+
 def _client():
     import anthropic
 
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        raise LlmUnavailable("ANTHROPIC_API_KEY not configured")
+        raise _KeyMissing("ANTHROPIC_API_KEY not configured")
     return anthropic.Anthropic(api_key=key, timeout=settings.RXGUARD["LLM_TIMEOUT_S"], max_retries=0)
+
+
+_gemini_client = None
+
+
+def _gemini():
+    global _gemini_client
+    key = _gemini_key()
+    if not key:
+        raise _KeyMissing("GEMINI_API_KEY not configured")
+    if _gemini_client is None:
+        from google import genai
+        from google.genai import types
+
+        _gemini_client = genai.Client(api_key=key, http_options=types.HttpOptions(
+            timeout=int(settings.RXGUARD["LLM_TIMEOUT_S"] * 1000), retry_options=types.HttpRetryOptions(attempts=1)))
+    return _gemini_client
 
 
 def _record(node, model, prompt_version, in_tok, out_tok, ms, level, status, error=""):
@@ -85,6 +124,53 @@ def _record(node, model, prompt_version, in_tok, out_tok, ms, level, status, err
 
 
 def _one_call(model: str, system: str, user: str, schema: dict, max_tokens: int):
+    """-> (text, input_tokens, output_tokens, status, error). Never raises for provider errors."""
+    try:
+        if provider(model) == "gemini":
+            return _one_call_gemini(model, system, user, schema, max_tokens)
+        return _one_call_anthropic(model, system, user, schema, max_tokens)
+    except _KeyMissing as e:
+        return None, 0, 0, "api_error", str(e)
+
+
+_GEMINI_BLOCKED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION", "IMAGE_SAFETY"}
+
+
+def _one_call_gemini(model: str, system: str, user: str, schema: dict, max_tokens: int):
+    import httpx
+    from google.genai import errors, types
+
+    cfg = dict(system_instruction=system, response_mime_type="application/json", response_json_schema=schema,
+               max_output_tokens=max_tokens, temperature=0)
+    level = settings.RXGUARD["LLM_GEMINI_THINKING_LEVEL"]
+    if level and "lite" not in model:
+        # Thinking tokens count toward max_output_tokens; "low" keeps latency and spend down.
+        cfg["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+    try:
+        resp = _gemini().models.generate_content(model=model, contents=user,
+                                                 config=types.GenerateContentConfig(**cfg))
+    except (httpx.TimeoutException, TimeoutError) as e:
+        return None, 0, 0, "timeout", str(e)
+    except errors.APIError as e:
+        status = {429: "rate_limited", 504: "timeout"}.get(e.code, "api_error")
+        return None, 0, 0, status, f"{e.code}: {str(e.message or e)[:500]}"
+    except httpx.HTTPError as e:
+        return None, 0, 0, "api_error", str(e)
+    um = resp.usage_metadata
+    in_tok = (um.prompt_token_count or 0) if um else 0
+    out_tok = ((um.candidates_token_count or 0) + (um.thoughts_token_count or 0)) if um else 0
+    if resp.prompt_feedback and resp.prompt_feedback.block_reason:
+        return None, in_tok, out_tok, "refusal", f"prompt blocked: {resp.prompt_feedback.block_reason}"
+    cand = resp.candidates[0] if resp.candidates else None
+    reason = getattr(cand.finish_reason, "name", str(cand.finish_reason)) if cand and cand.finish_reason else ""
+    if reason in _GEMINI_BLOCKED:
+        return None, in_tok, out_tok, "refusal", f"finish_reason={reason}"
+    if reason == "MAX_TOKENS":
+        return None, in_tok, out_tok, "schema_error", "output truncated at max_output_tokens"
+    return resp.text or "", in_tok, out_tok, "ok", ""
+
+
+def _one_call_anthropic(model: str, system: str, user: str, schema: dict, max_tokens: int):
     import anthropic
 
     kwargs = dict(model=model, max_tokens=max_tokens, system=system,

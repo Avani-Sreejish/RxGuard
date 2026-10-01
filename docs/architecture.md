@@ -20,13 +20,14 @@ flowchart TD
   ASK --> T3
   AG --> GW[LLM gateway: token cap, usage + cost logging]
   ASK --> GW
-  GW --> M1[Primary model] -.-> M2[Fallback model] -.-> TPL[Template mode - no LLM]
+  GW --> M1[Primary model: Gemini flash-lite] -.-> M2[Fallback model: Gemini flash or Claude] -.-> TPL[Template mode - no LLM]
   GW --> VER[Claim verifier: exists, whitelisted, DB exactness, support, scope]
   VER --> HITL[Pharmacist review: P1 gate]
   HITL --> AUD[Hash-chained audit_logs + verify endpoint]
   T1 --> DB[(MySQL: drugs, drug_interactions, sessions, findings, reviews, audit, logs)]
   T3 --> DB
   T2 --> FX[(FAISS IndexFlatIP, e5 embeddings)]
+  T2 --> BM[BM25 keyword index, in memory] --> RRF[RRF fusion -> optional cross-encoder rerank]
   T2 -.fallback: FULLTEXT, marked degraded.-> DB
 ```
 
@@ -35,7 +36,7 @@ flowchart TD
 | Path | LLM on the normal path? | What happens |
 |---|---|---|
 | `POST /api/v1/check` | No (only for lines the dictionary cannot match) | validate → safety pre-check → alias scan → fuzzy → Tool 1 (one SQL query over all pairs + duplication) → triage R1–R9 → persist → escalations → audit |
-| `POST /api/v1/explain` | One batched call per prescription | resume `/check` state → Tool 2 per finding (drug prefilter → FAISS → threshold → one expansion retry) → one structured LLM call on findings + whitelisted chunks only → verifier → escalations → audit |
+| `POST /api/v1/explain` | One batched call per prescription | resume `/check` state → Tool 2 per finding (drug prefilter → FAISS + BM25 → RRF → optional rerank → threshold → one expansion retry) → one structured LLM call on findings + whitelisted chunks only → verifier → escalations → audit |
 | `POST /api/v1/ask` | Router + answer (≤3 calls incl. both) | safety pre-check (refusals before any LLM) → session reference resolution → ToolPlan → read-only tools → cited claims → verifier |
 
 ## Deployment shape
