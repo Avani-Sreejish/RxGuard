@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import statistics
 from decimal import Decimal
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -302,6 +303,35 @@ class ConfirmItem(RxView):
         return Response(S.prescription_dict(p))
 
 
+_DDINTER_CACHE: dict[tuple[str, str], str] = {}
+
+
+def _find_exact_ddinter_file(drug_a: str, drug_b: str) -> str:
+    key = tuple(sorted((drug_a.strip().lower(), drug_b.strip().lower())))
+    if key in _DDINTER_CACHE:
+        return _DDINTER_CACHE[key]
+
+    raw_dir = Path(settings.BASE_DIR).parent / "data" / "raw" / "ddinter"
+    if not raw_dir.exists():
+        raw_dir = Path(settings.BASE_DIR) / "data" / "raw" / "ddinter"
+
+    if raw_dir.exists():
+        for csv_file in sorted(raw_dir.glob("ddinter_downloads_code_*.csv")):
+            try:
+                with open(csv_file, "r", encoding="utf-8", errors="ignore") as fp:
+                    for line in fp:
+                        if key[0] in line.lower() and key[1] in line.lower():
+                            fn = csv_file.name
+                            _DDINTER_CACHE[key] = fn
+                            return fn
+            except Exception:
+                continue
+
+    fn = "ddinter_downloads_code_A.csv … code_V.csv"
+    _DDINTER_CACHE[key] = fn
+    return fn
+
+
 class FindingDetail(RxView):
     """Prove Why: finding -> claims -> DB record / chunk -> document -> version -> verifier -> correlation ID."""
 
@@ -317,10 +347,13 @@ class FindingDetail(RxView):
                                                                 "finding").order_by("id"):
                 claims.append(S.claim_dict(c))
         i = f.interaction
-        source_file = "ddinter_downloads_code_A-V.csv (DDInter 1.0 Dataset)"
+        source_file = "ddinter_downloads_code_A.csv … code_V.csv (DDInter 1.0 Dataset)"
         if i.source and ("upload" in i.source.lower() or ".csv" in i.source.lower()):
             source_file = i.source.replace("Pharmacist Upload: ", "")
-        elif i.source and i.source != "DDInter":
+        elif i.source == "DDInter":
+            exact_fn = _find_exact_ddinter_file(i.drug_a.generic_name, i.drug_b.generic_name)
+            source_file = f"{exact_fn} (DDInter 1.0 Dataset)"
+        elif i.source:
             source_file = f"{i.source}.csv"
 
         return Response({
