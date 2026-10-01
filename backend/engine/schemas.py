@@ -70,6 +70,30 @@ class ExplainInput(Strict):
     prescription_id: int = Field(ge=1)
 
 
+class TranslateInput(Strict):
+    """Text already shown to the pharmacist (passages, verified claims, answers) to render in ml / hi."""
+    lang: Literal["ml", "hi"]
+    texts: list[str] = Field(min_length=1, max_length=8)
+
+    @field_validator("texts")
+    @classmethod
+    def bounded(cls, v: list[str]) -> list[str]:
+        if any(not t.strip() or len(t) > 1500 for t in v):
+            raise ValueError("each text must be 1-1500 characters")
+        if sum(len(t) for t in v) > 6000:
+            raise ValueError("at most 6000 characters per request")
+        return v
+
+
+class TranslatedText(Strict):
+    index: int = Field(ge=0, le=7)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class TranslationBatch(Strict):
+    translations: list[TranslatedText] = Field(min_length=1, max_length=8)
+
+
 class AskInput(Strict):
     session_id: int = Field(ge=1)
     question: str = Field(min_length=1, max_length=1000)

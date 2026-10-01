@@ -86,6 +86,7 @@ python scripts/calibrate_retrieval.py      # retrieval-threshold calibration tab
 | `POST /api/v1/check` | deterministic check (JSON `text`, or multipart `file`: .txt / text-based PDF) |
 | `POST /api/v1/explain` | RAG + one LLM call + verifier; resumes the saved `/check` state |
 | `POST /api/v1/ask` | follow-up Q&A in a session (≤3 tool calls) |
+| `POST /api/v1/translate` | Malayalam / Hindi rendering of text already on screen; rejected unless every drug name and number survives |
 | `GET /api/v1/prescriptions`, `/prescriptions/{id}` | queue / full view |
 | `POST /api/v1/prescriptions/{id}/items/{item}/confirm` | pharmacist confirms an unresolved line (re-checks Tool 1) |
 | `POST /api/v1/prescriptions/{id}/complete` | final review state — 409 until every P1 finding has an action |
@@ -193,7 +194,9 @@ All prescriptions in this repo are synthetic.
   to template mode, so flags never depend on quota, but demos and eval runs should use a model with headroom.
 - **The cross-encoder cutoff is uncalibrated** and reranking is off by default; the hybrid (BM25 + RRF) effect on
   Recall@5 has not been re-measured on the real corpus yet.
-- The Malayalam/Hindi explanation layer (stretch) is not built.
+- The Malayalam/Hindi layer is machine translation (one LLM call per batch, cached). Fixed UI and safety wording is
+  hand-translated in `frontend/src/i18n.ts`; free text goes through `/api/v1/translate`, which rejects any output
+  that drops a drug name or number. It has not been evaluated by native-speaker pharmacists yet (E21 NOT MEASURED).
 - No clinical validation with practising pharmacists.
 - Performance numbers apply only to the measured machine (laptop, Docker Desktop) and load profile; run C used an
   *assumed* 2 s LLM latency and a small drug pool that favours the embedding cache.
@@ -220,14 +223,16 @@ All prescriptions in this repo are synthetic.
 | Stretch | Human-in-the-loop | Built: review actions, P1 gate, item confirmation |
 | Stretch | Load-test report | Runs A and C (mocked LLM); run B NOT MEASURED |
 | Stretch | Prompt versioning with eval scores | prompt_versions + evaluation_runs per prompt version |
-| Stretch | Regional language | Not built |
+| Stretch | Regional language | Built: UI in English / Malayalam / Hindi; `/api/v1/translate` with a drug-name and number check; not yet evaluated |
 
 ## Repository layout
 
 ```
 backend/   Django project (api/ = models, views, serializers; engine/ = pipeline, tools, safety, verifier, gateway;
            kbload/ = DDInter/NLEM/corpus loaders; tests/)
-frontend/  React + Vite UI (queue, detail with map/Prove Why/review/audit, Judge Attack, observability, sources)
+frontend/  React + Vite pharmacist UI: sign-in, new check (patient + prescription pad), review (medicines, findings,
+           guideline citations, human-in-the-loop actions, ask, audit), queue, patient history, evaluation.
+           `npm run build:demo` builds an offline demo with fictional data (no backend).
 eval/      cases.yaml, run.py, labels_todo.csv (claims for two human labelers)
 loadtest/  locustfile.py, report.py, REPORT.md
 data/      corpus_manifest.yaml, curated/, synthetic/   (raw downloads, index and processed files are git-ignored)

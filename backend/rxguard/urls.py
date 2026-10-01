@@ -14,6 +14,7 @@ urlpatterns = [
     path(api + "check", v.Check.as_view()),
     path(api + "explain", v.Explain.as_view()),
     path(api + "ask", v.Ask.as_view()),
+    path(api + "translate", v.Translate.as_view()),
     path(api + "sessions", v.SessionView.as_view()),
     path(api + "sessions/<int:session_id>", v.SessionView.as_view()),
     path(api + "prescriptions", v.PrescriptionList.as_view()),

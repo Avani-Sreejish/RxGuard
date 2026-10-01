@@ -1,38 +1,51 @@
+import { useI18n } from "../i18n";
 import type { Priority } from "../types";
 
-export const DbFact = () => <span className="badge db">DATABASE FACT</span>;
-export const AiVerified = () => <span className="badge ai">AI EXPLANATION — VERIFIED</span>;
-export const Insufficient = () => <span className="badge insuff">INSUFFICIENT EVIDENCE</span>;
-export const Escalation = ({ code }: { code?: string }) => (
-  <span className="badge esc">ESCALATION{code ? ` · ${code}` : ""}</span>
-);
-export const Unresolved = () => <span className="badge unres">UNRESOLVED</span>;
-export const Synthetic = () => <span className="badge synth">SYNTHETIC DEMO DATA</span>;
-export const Template = () => <span className="badge tpl">TEMPLATE MODE (no LLM)</span>;
-export const Degraded = () => <span className="badge degraded">DEGRADED RETRIEVAL (FULLTEXT)</span>;
+export function PriorityPill({ p }: { p: Priority }) {
+  const { t } = useI18n();
+  return <span className={`pill prio-${p}`}>{t(`prio.${p}`)}</span>;
+}
 
-export function Prio({ p, rule, title }: { p: Priority; rule?: string; title?: string }) {
+export function SeverityPill({ s }: { s: string }) {
+  const { t } = useI18n();
+  return <span className={`pill sev-${s}`}>{t(`sev.${s}`)}</span>;
+}
+
+export function StatusText({ s }: { s: string }) {
+  const { t } = useI18n();
+  const done = s === "REVIEWED" || s === "CLEAR";
   return (
-    <span className={`prio ${p}`} title={title ?? "Queue-ordering label, not a clinical risk score"}>
-      {p}
-      {rule ? ` · ${rule}` : ""}
+    <span className={`status ${done ? "done" : "open"}`}>
+      <span className="dot" aria-hidden />
+      {t(`status.${s}`)}
     </span>
   );
 }
 
-export function Sev({ s }: { s: string }) {
-  return <span className={`sev ${s}`}>{s}</span>;
+export function Tag({ children, tone = "plain", title }: { children: React.ReactNode; tone?: "plain" | "brand" | "warn" | "muted"; title?: string }) {
+  return (
+    <span className={`tag tag-${tone}`} title={title}>
+      {children}
+    </span>
+  );
 }
 
-export function Highlight({ text, span }: { text: string; span?: string }) {
-  if (!span) return <>{text}</>;
-  const i = text.indexOf(span);
-  if (i < 0) return <>{text}</>;
+export function Spinner({ label }: { label?: string }) {
   return (
-    <>
-      {text.slice(0, i)}
-      <mark>{span}</mark>
-      {text.slice(i + span.length)}
-    </>
+    <span className="spinner" role="status" aria-label={label ?? "Loading"}>
+      <span />
+    </span>
   );
+}
+
+export function fmtDateTime(iso: string, lang: string) {
+  const d = new Date(iso);
+  const loc = lang === "ml" ? "ml-IN" : lang === "hi" ? "hi-IN" : "en-IN";
+  return d.toLocaleString(loc, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+export function fmtDate(iso: string, lang: string) {
+  const d = new Date(iso);
+  const loc = lang === "ml" ? "ml-IN" : lang === "hi" ? "hi-IN" : "en-IN";
+  return d.toLocaleDateString(loc, { day: "numeric", month: "short", year: "numeric" });
 }

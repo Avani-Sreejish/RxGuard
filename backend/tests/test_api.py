@@ -269,3 +269,40 @@ def test_upload_guidelines(client):
 
 
 
+
+
+def test_translate_unavailable_without_llm(client):
+    """No API key in tests: the regional layer reports 503 and the UI falls back to English."""
+    r = client.post("/api/v1/translate", {"lang": "ml", "texts": ["Warfarin with aspirin increases bleeding risk."]},
+                    format="json")
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "translation_unavailable"
+    assert client.post("/api/v1/translate", {"lang": "ta", "texts": ["x"]}, format="json").status_code == 400
+    assert client.post("/api/v1/translate", {"lang": "hi", "texts": []}, format="json").status_code == 400
+
+
+def test_translate_rejects_lost_drug_names_and_numbers(client, monkeypatch):
+    """A translation is shown only if every drug name and number survives; otherwise English only."""
+    from engine import llm_gateway, translate
+    from engine.schemas import TranslationBatch
+
+    def fake(node, prompt, user, model, budget, validation_context=None):
+        assert node == "translate" and "Hindi" in user
+        return TranslationBatch.model_validate({"translations": [
+            {"index": 0, "text": "warfarin को aspirin के साथ देने से रक्तस्राव का जोखिम बढ़ता है; INR 2 से 3 रखें।"},
+            {"index": 1, "text": "इन दवाओं से रक्तस्राव का जोखिम बढ़ता है।"},
+            {"index": 2, "text": "Synwarf 5 mg दिन में एक बार।"},
+        ]}), {"model": "fake", "fallback_level": 0, "prompt_version": prompt.version_tag}
+
+    translate._cache.clear()
+    monkeypatch.setattr(llm_gateway, "call_structured", fake)
+    r = client.post("/api/v1/translate", {"lang": "hi", "texts": [
+        "Warfarin with aspirin increases bleeding risk; keep INR 2 to 3.",
+        "Warfarin with aspirin increases bleeding risk.",
+        "Synwarf 10 mg once daily.",
+    ]}, format="json")
+    assert r.status_code == 200, r.content
+    out = r.json()["translations"]
+    assert out[0]["status"] == "ok" and "warfarin" in out[0]["text"]
+    assert out[1]["status"] == "rejected" and "drug name" in out[1]["reason"]
+    assert out[2]["status"] == "rejected" and "number" in out[2]["reason"]

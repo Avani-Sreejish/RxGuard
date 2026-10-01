@@ -124,6 +124,7 @@ REST_FRAMEWORK = {
         "check": env("THROTTLE_CHECK", "60/min"),
         "explain": env("THROTTLE_EXPLAIN", "20/min"),
         "ask": env("THROTTLE_ASK", "20/min"),
+        "translate": env("THROTTLE_TRANSLATE", "30/min"),
     },
     "UNAUTHENTICATED_USER": None,
 }

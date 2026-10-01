@@ -252,6 +252,24 @@ class Ask(RxView):
         return Response(ask_mode.run_ask(request.user, session, inp.question))
 
 
+class Translate(RxView):
+    """Malayalam / Hindi rendering of text already on screen. Never changes findings; see engine/translate.py."""
+    throttle_scope = "translate"
+
+    def post(self, request):
+        from engine import llm_gateway, translate
+        from engine.schemas import TranslateInput
+
+        inp = TranslateInput.model_validate(request.data)
+        kb = KbVersion.objects.get(is_current=True)
+        try:
+            return Response(translate.translate(inp.texts, inp.lang, kb))
+        except llm_gateway.LlmUnavailable as e:
+            return error_response(503, "translation_unavailable",
+                                  "Translation needs the LLM, which is not available. Use the English text.",
+                                  {"reason": str(e)[:200]})
+
+
 class SessionView(RxView):
     def post(self, request):
         s = Session.objects.create(user=request.user)

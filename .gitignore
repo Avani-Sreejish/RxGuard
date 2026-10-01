@@ -11,3 +11,4 @@ frontend/dist/
 loadtest/results/*.html
 .pytest_cache/
 frontend/*.tsbuildinfo
+frontend/dist-demo/
