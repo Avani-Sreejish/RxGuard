@@ -1,2 +1,5 @@
 case,claim,source_type,source_id,auto_gold_match,labeler_1_supported,labeler_2_supported
-E15,DDInter records Fluconazole and Warfarin as a Major interaction.,DATABASE,61564,True,,
+E11,Clarithromycin is included in the National List of Essential Medicines 2022 under other antibacterials and antituberculosis medicines at the secondary and tertiary levels of healthcare.,RAG_CHUNK,97,True,,
+E14,DDInter records Acetylsalicylic acid and Warfarin as a Major interaction.,DATABASE,8466,True,,
+E14,"Measures to reduce high bleeding risk include avoiding concomitant aspirin, anti platelets, NSAIDs or alcohol.",RAG_CHUNK,459,True,,
+E15,Fluconazole and Warfarin have a major interaction.,DATABASE,61564,True,,

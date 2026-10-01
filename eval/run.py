@@ -176,7 +176,7 @@ class Runner:
             f = next(x for x in b["findings"] if x["ordinal"] == n)
             used = [t for t in a["tool_trace"] if t["tool"] == "get_finding"]
             ok = any(t["args"].get("finding_ordinal") == n for t in used)
-            self.record(cid, "A", ok and f["severity"] in a["answer"], detail=f"trace={used} answer={a['answer'][:160]}")
+            self.record(cid, "A", ok and f["severity"].lower() in a["answer"].lower(), detail=f"trace={used} answer={a['answer'][:160]}")
             self.score_displayed_claims(cid, a.get("claims", []), source="ask")
         if "gold_chunks" in case:
             self.score_guideline(case, a)

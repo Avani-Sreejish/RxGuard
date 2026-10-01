@@ -228,14 +228,19 @@ def run_ask(user, session, question: str) -> dict:
     except llm_gateway.LlmUnavailable:
         kept, dropped, mode = [], [], "template"
     if not kept:
-        kept = [{"claim_id": f"t{i}", "finding_ordinal": x.get("ordinal", 1), "source_type": "DATABASE",
-                 "source_id": x["interaction_id"],
-                 "text": f"DDInter records {x['drug_a']} and {x['drug_b']} as a {x['severity']} interaction."}
-                for i, x in enumerate(interactions.values(), start=1)]
-        if mode == "llm":
+        if interactions:
+            kept = [{"claim_id": f"t{i}", "finding_ordinal": x.get("ordinal", 1), "source_type": "DATABASE",
+                     "source_id": x["interaction_id"],
+                     "text": f"DDInter records {x['drug_a']} and {x['drug_b']} as a {x['severity']} interaction."}
+                    for i, x in enumerate(interactions.values(), start=1)]
             mode = "template"
-    answer = " ".join(c["text"] for c in kept) if kept else (
-        "Relevant passages were retrieved and are shown below as evidence cards (source text, not AI-generated).")
+            answer = " ".join(c["text"] for c in kept)
+        else:
+            answer = safety.INSUFFICIENT
+            esc("INSUFFICIENT_EVIDENCE", "S1", f"Insufficient evidence retrieved for question: {question[:200]}")
+            mode = "insufficient"
+    else:
+        answer = " ".join(c["text"] for c in kept)
     base.update(claims=kept, dropped=dropped, mode=mode)
     _step(latest.id if latest else None, "answer", t3, f"mode={mode} kept={len(kept)} dropped={len(dropped)}")
     return _finish(session, latest, {**base, "answer": answer}, cid, budget)
