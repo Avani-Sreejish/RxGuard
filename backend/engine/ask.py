@@ -230,11 +230,11 @@ def run_ask(user, session, question: str) -> dict:
     except llm_gateway.LlmUnavailable:
         kept, dropped, mode = [], [], "template"
     if not kept:
-        kept = [{"claim_id": f"t{i}", "finding_ordinal": x.get("ordinal", 1), "source_type": "DATABASE",
-                 "source_id": x["interaction_id"],
-                 "text": f"DDInter records {x['drug_a']} and {x['drug_b']} as a {x['severity']} interaction."}
-                for i, x in enumerate(interactions.values(), start=1)]
-        if mode == "llm":
+        if interactions:
+            kept = [{"claim_id": f"t{i}", "finding_ordinal": x.get("ordinal", 1), "source_type": "DATABASE",
+                     "source_id": x["interaction_id"],
+                     "text": f"DDInter records {x['drug_a']} and {x['drug_b']} as a {x['severity']} interaction."}
+                    for i, x in enumerate(interactions.values(), start=1)]
             mode = "template"
     if not kept and mode == "llm":
         # The model ran but none of its claims survived verification: nothing retrieved answers the question.

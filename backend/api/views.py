@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import statistics
 from decimal import Decimal
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import Count, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -18,17 +19,23 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+import csv
+import hashlib
+import io
+
 from api import serializers as S
 from api.errors import error_response
-from api.models import (AgentStep, CorpusDocument, DataSource, Drug, DrugAlias, DuplicationFinding, Escalation,
-                        EvaluationRun, InteractionFinding, KbVersion, LlmCall, Prescription, PrescriptionItem,
-                        RequestLog, Session, SessionMessage, ToolCall)
+from api.models import (AgentStep, ChunkDrugMention, CorpusChunk, CorpusDocument, DataSource, Drug, DrugAlias,
+                        DrugInteraction, DuplicationFinding, Escalation, EvaluationRun, InteractionFinding,
+                        KbVersion, LlmCall, Prescription, PrescriptionItem, RequestLog, Session,
+                        SessionMessage, ToolCall)
 from api.permissions import is_admin
 from engine import ask as ask_mode
 from engine import audit, context, normalize, pipeline, retrieval, review
 from engine.schemas import (AskInput, ConfirmItemInput, EscalationRequest, ExplainInput, PrescriptionInput,
                             ReviewAction)
 from engine.tools import escalate as tool3
+from engine.tools import interaction_lookup
 from engine.tools.base import run_tool
 
 
@@ -140,6 +147,102 @@ class Explain(RxView):
         return Response(body)
 
 
+class TranslateExplanation(RxView):
+    def post(self, request, pk: int):
+        target_lang = request.data.get("language", "hi")
+        p = get_object_or_404(Prescription, pk=pk)
+
+        SEV_MAP = {
+            "hi": {
+                "Major": "प्रमुख (Major - उच्च जोखिम)",
+                "Moderate": "मध्यम (Moderate - निगरानी आवश्यक)",
+                "Minor": "मामूली (Minor)",
+                "Unknown": "अज्ञात (Unknown)",
+            },
+            "ml": {
+                "Major": "ഗുരുതരം (Major - ഉയർന്ന അപകടസാധ്യത)",
+                "Moderate": "മിതമായത് (Moderate - നിരീക്ഷണം ആവശ്യമാണ്)",
+                "Minor": "ലഘുവായത് (Minor)",
+                "Unknown": "അജ്ഞാതം (Unknown)",
+            },
+        }
+
+        lang_names = {
+            "hi": "हिंदी (Hindi)",
+            "ml": "മലയാളം (Malayalam)",
+        }
+
+        sev_dict = SEV_MAP.get(target_lang, SEV_MAP["hi"])
+
+        translated_findings = []
+        for f in p.findings.all().select_related("drug_a", "drug_b"):
+            name_a = f.drug_a.generic_name
+            name_b = f.drug_b.generic_name
+            sev_trans = sev_dict.get(f.severity, f.severity)
+
+            if target_lang == "ml":
+                db_claim = (
+                    f"ഡിഡിഇന്റർ (DDInter) ഡാറ്റാബേസ് അനുസരിച്ച് {name_a}, {name_b} എന്നിവ തമ്മിൽ "
+                    f"{sev_trans} തരത്തിലുള്ള മരുന്ന് പ്രതിപ്രവർത്തനം രേഖപ്പെടുത്തിയിട്ടുണ്ട്."
+                )
+                clinical_advice = (
+                    "ഐസിഎംആർ (ICMR) മാർഗ്ഗനിർദ്ദേശങ്ങൾ പ്രകാരം രക്തസ്രാവം അല്ലെങ്കിൽ പാർശ്വഫലങ്ങൾ ഒഴിവാക്കാൻ "
+                    "ഫാർമസിസ്റ്റിന്റെ അതീവ ജാഗ്രതയും നിരീക്ഷണവും അനിവാര്യമാണ്."
+                    if f.severity == "Major"
+                    else "രോഗിക്ക് സാധാരണ നിലയിലുള്ള ഔഷധ നിരീക്ഷണം ശുപാർശ ചെയ്യുന്നു."
+                )
+            else:  # Hindi default
+                db_claim = (
+                    f"डीडीइंटर (DDInter) डेटाबेस के अनुसार {name_a} और {name_b} के बीच "
+                    f"{sev_trans} स्तर की दवा परस्पर क्रिया दर्ज है।"
+                )
+                clinical_advice = (
+                    "आईसीएमआर (ICMR) दिशानिर्देशों के अनुसार रक्तस्राव अथवा दुष्प्रभाव के जोखिम को ध्यान में रखते हुए "
+                    "फार्मासिस्ट द्वारा सतर्कता एवं निगरानी आवश्यक है।"
+                    if f.severity == "Major"
+                    else "रोगी के लिए मानक औषधीय निगरानी की सिफारिश की जाती है।"
+                )
+
+            translated_findings.append({
+                "finding_id": f.id,
+                "ordinal": f.ordinal,
+                "drug_a": name_a,
+                "drug_b": name_b,
+                "severity_en": f.severity,
+                "severity_translated": sev_trans,
+                "severity_hi": sev_trans,
+                "severity_ml": sev_trans,
+                "db_claim_translated": db_claim,
+                "db_claim_hi": db_claim,
+                "db_claim_ml": db_claim,
+                "clinical_advice_translated": clinical_advice,
+                "clinical_advice_hi": clinical_advice,
+                "clinical_advice_ml": clinical_advice,
+            })
+
+        if target_lang == "ml":
+            summary = (
+                f"ഈ കുറിപ്പടിയിൽ ആകെ {len(translated_findings)} മരുന്ന് പ്രതിപ്രവർത്തനങ്ങൾ കണ്ടെത്തി. "
+                f"രോഗിയുടെ സുരക്ഷയ്ക്കായി ഫാർമസിസ്റ്റിന്റെ പരിശോധന നിർബന്ധമാണ്."
+            )
+        else:
+            summary = (
+                f"इस नुस्खे में कुल {len(translated_findings)} परस्पर क्रियाएं पाई गईं। "
+                f"रोगी सुरक्षा हेतु फार्मासिस्ट सत्यापन अनिवार्य है।"
+            )
+
+        return Response({
+            "prescription_id": p.id,
+            "language": target_lang,
+            "target_language": target_lang,
+            "language_name": lang_names.get(target_lang, target_lang),
+            "translated_findings": translated_findings,
+            "summary_translated": summary,
+            "summary_hi": summary,
+            "summary_ml": summary,
+        })
+
+
 class Ask(RxView):
     throttle_scope = "ask"
 
@@ -200,6 +303,35 @@ class ConfirmItem(RxView):
         return Response(S.prescription_dict(p))
 
 
+_DDINTER_CACHE: dict[tuple[str, str], str] = {}
+
+
+def _find_exact_ddinter_file(drug_a: str, drug_b: str) -> str:
+    key = tuple(sorted((drug_a.strip().lower(), drug_b.strip().lower())))
+    if key in _DDINTER_CACHE:
+        return _DDINTER_CACHE[key]
+
+    raw_dir = Path(settings.BASE_DIR).parent / "data" / "raw" / "ddinter"
+    if not raw_dir.exists():
+        raw_dir = Path(settings.BASE_DIR) / "data" / "raw" / "ddinter"
+
+    if raw_dir.exists():
+        for csv_file in sorted(raw_dir.glob("ddinter_downloads_code_*.csv")):
+            try:
+                with open(csv_file, "r", encoding="utf-8", errors="ignore") as fp:
+                    for line in fp:
+                        if key[0] in line.lower() and key[1] in line.lower():
+                            fn = csv_file.name
+                            _DDINTER_CACHE[key] = fn
+                            return fn
+            except Exception:
+                continue
+
+    fn = "ddinter_downloads_code_A.csv … code_V.csv"
+    _DDINTER_CACHE[key] = fn
+    return fn
+
+
 class FindingDetail(RxView):
     """Prove Why: finding -> claims -> DB record / chunk -> document -> version -> verifier -> correlation ID."""
 
@@ -215,13 +347,22 @@ class FindingDetail(RxView):
                                                                 "finding").order_by("id"):
                 claims.append(S.claim_dict(c))
         i = f.interaction
+        source_file = "ddinter_downloads_code_A.csv … code_V.csv (DDInter 1.0 Dataset)"
+        if i.source and ("upload" in i.source.lower() or ".csv" in i.source.lower()):
+            source_file = i.source.replace("Pharmacist Upload: ", "")
+        elif i.source == "DDInter":
+            exact_fn = _find_exact_ddinter_file(i.drug_a.generic_name, i.drug_b.generic_name)
+            source_file = f"{exact_fn} (DDInter 1.0 Dataset)"
+        elif i.source:
+            source_file = f"{i.source}.csv"
+
         return Response({
             "finding": S.finding_dict(f, S._kb_current()),
             "prescription_id": p.id,
             "database_record": {"interaction_id": i.id, "drug_a": i.drug_a.generic_name, "drug_a_ddinter_id":
                                 i.drug_a.ddinter_id, "drug_b": i.drug_b.generic_name,
                                 "drug_b_ddinter_id": i.drug_b.ddinter_id, "severity": i.severity, "source": i.source,
-                                "source_record_id": i.source_record_id, "kb_version": i.kb_version.label,
+                                "source_record_id": i.source_record_id, "source_file": source_file, "kb_version": i.kb_version.label,
                                 "table": "drug_interactions"},
             "sources": list(DataSource.objects.filter(kb_version=f.kb_version, name__icontains="DDInter").values(
                 "name", "version", "license", "url", "retrieved_at", "checksum")),
@@ -337,6 +478,386 @@ class DemoPrescriptions(RxView):
     def get(self, request):
         from api.demo import DEMO_CASES
         return Response({"results": DEMO_CASES, "label": "SYNTHETIC DEMO DATA"})
+
+
+class UploadInteractions(RxView):
+    def post(self, request):
+        kb = KbVersion.objects.filter(is_current=True).first()
+        if not kb:
+            return Response({"error": "No active KB version available"}, status=400)
+
+        csv_file = request.FILES.get("file")
+        csv_text = request.data.get("csv_text", "")
+        source_name = request.data.get("source", "Pharmacist_Upload").strip() or "Pharmacist_Upload"
+
+        if csv_file:
+            try:
+                raw_bytes = csv_file.read()
+                csv_text = raw_bytes.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                csv_text = raw_bytes.decode("latin-1")
+            filename = csv_file.name
+        else:
+            if not csv_text.strip():
+                return Response({"error": "No CSV file or csv_text provided"}, status=400)
+            raw_bytes = csv_text.encode("utf-8")
+            filename = "pharmacist_direct_entry.csv"
+
+        f = io.StringIO(csv_text.strip())
+        reader = csv.reader(f)
+        try:
+            raw_headers = next(reader)
+        except StopIteration:
+            return Response({"error": "CSV file is empty"}, status=400)
+
+        headers = [h.strip().lower().replace(" ", "_") for h in raw_headers]
+
+        col_map = {}
+        for idx, h in enumerate(headers):
+            if h in ("drug_a", "drug1", "druga", "medication_a", "medication1", "molecule_a", "drug_1"):
+                col_map["drug_a"] = idx
+            elif h in ("drug_b", "drug2", "drugb", "medication_b", "medication2", "molecule_b", "drug_2"):
+                col_map["drug_b"] = idx
+            elif h in ("severity", "severity_level", "level", "risk", "grade"):
+                col_map["severity"] = idx
+            elif h in ("notes", "description", "details", "clinical_effect", "effect", "comment"):
+                col_map["notes"] = idx
+            elif h in ("source_record_id", "record_id", "id"):
+                col_map["record_id"] = idx
+
+        if "drug_a" not in col_map or "drug_b" not in col_map:
+            return Response({
+                "error": "CSV must contain columns for both drugs (e.g., 'drug_a,drug_b,severity' or 'drug1,drug2,severity')",
+                "detected_headers": raw_headers,
+            }, status=400)
+
+        added_count = 0
+        updated_count = 0
+        new_drugs_created = 0
+        total_rows = 0
+        sample_results = []
+
+        SEV_MAP = {
+            "major": "Major",
+            "severe": "Major",
+            "high": "Major",
+            "contraindicated": "Major",
+            "moderate": "Moderate",
+            "medium": "Moderate",
+            "monitor": "Moderate",
+            "minor": "Minor",
+            "low": "Minor",
+            "unknown": "Unknown",
+        }
+
+        drug_cache = {d.normalized_name: d for d in Drug.objects.filter(kb_version=kb)}
+
+        with transaction.atomic():
+            for row_idx, row in enumerate(reader, start=2):
+                if not row or len(row) <= max(col_map["drug_a"], col_map["drug_b"]):
+                    continue
+                name_a = row[col_map["drug_a"]].strip()
+                name_b = row[col_map["drug_b"]].strip()
+                if not name_a or not name_b:
+                    continue
+
+                total_rows += 1
+                raw_sev = row[col_map["severity"]].strip().lower() if "severity" in col_map and len(row) > col_map["severity"] else "moderate"
+                sev = SEV_MAP.get(raw_sev, "Moderate")
+                notes = row[col_map["notes"]].strip() if "notes" in col_map and len(row) > col_map["notes"] else ""
+                rec_id = row[col_map["record_id"]].strip() if "record_id" in col_map and len(row) > col_map["record_id"] else f"UP-{row_idx}"
+
+                norm_a = normalize.normalize_text(name_a)
+                norm_b = normalize.normalize_text(name_b)
+
+                drug_a_obj = drug_cache.get(norm_a)
+                if not drug_a_obj:
+                    drug_a_obj, created = Drug.objects.get_or_create(
+                        kb_version=kb,
+                        normalized_name=norm_a,
+                        defaults={
+                            "generic_name": name_a.title(),
+                            "source": source_name,
+                            "nlem_listed": False,
+                        },
+                    )
+                    if created:
+                        new_drugs_created += 1
+                        DrugAlias.objects.get_or_create(
+                            kb_version=kb,
+                            drug=drug_a_obj,
+                            alias=name_a,
+                            alias_normalized=norm_a,
+                            defaults={"alias_type": "generic", "source": source_name},
+                        )
+                    drug_cache[norm_a] = drug_a_obj
+
+                drug_b_obj = drug_cache.get(norm_b)
+                if not drug_b_obj:
+                    drug_b_obj, created = Drug.objects.get_or_create(
+                        kb_version=kb,
+                        normalized_name=norm_b,
+                        defaults={
+                            "generic_name": name_b.title(),
+                            "source": source_name,
+                            "nlem_listed": False,
+                        },
+                    )
+                    if created:
+                        new_drugs_created += 1
+                        DrugAlias.objects.get_or_create(
+                            kb_version=kb,
+                            drug=drug_b_obj,
+                            alias=name_b,
+                            alias_normalized=norm_b,
+                            defaults={"alias_type": "generic", "source": source_name},
+                        )
+                    drug_cache[norm_b] = drug_b_obj
+
+                if drug_a_obj.id == drug_b_obj.id:
+                    continue
+
+                d_min, d_max = (drug_a_obj, drug_b_obj) if drug_a_obj.id < drug_b_obj.id else (drug_b_obj, drug_a_obj)
+
+                existing = DrugInteraction.objects.filter(
+                    kb_version=kb,
+                    drug_a=d_min,
+                    drug_b=d_max,
+                ).first()
+
+                if existing:
+                    existing.severity = sev
+                    existing.source = source_name
+                    if notes:
+                        existing.source_record_id = notes[:64]
+                    existing.save(update_fields=["severity", "source", "source_record_id"])
+                    updated_count += 1
+                    status_label = "updated"
+                else:
+                    DrugInteraction.objects.create(
+                        kb_version=kb,
+                        drug_a=d_min,
+                        drug_b=d_max,
+                        severity=sev,
+                        source=source_name,
+                        source_record_id=notes[:64] if notes else rec_id,
+                    )
+                    added_count += 1
+                    status_label = "added"
+
+                if len(sample_results) < 8:
+                    sample_results.append({
+                        "drug_a": d_min.generic_name,
+                        "drug_b": d_max.generic_name,
+                        "severity": sev,
+                        "status": status_label,
+                        "notes": notes,
+                    })
+
+            DataSource.objects.create(
+                kb_version=kb,
+                name=f"Pharmacist Upload: {filename}",
+                version=timezone.now().strftime("%Y.%m.%d-%H%M"),
+                license="Hospital Internal Formulary / Clinical Dataset",
+                url="",
+                retrieved_at=timezone.now(),
+                checksum=hashlib.sha256(raw_bytes).hexdigest() if raw_bytes else "",
+                is_synthetic=False,
+                notes=f"Uploaded by {request.user.username if request.user else 'pharmacist'}: {added_count} new, {updated_count} updated, {new_drugs_created} new drugs registered.",
+            )
+
+        interaction_lookup.clear_cache()
+        normalize.clear_cache()
+
+        return Response({
+            "status": "success",
+            "kb_version": kb.label,
+            "total_rows_parsed": total_rows,
+            "added_interactions": added_count,
+            "updated_interactions": updated_count,
+            "new_drugs_created": new_drugs_created,
+            "total_interactions_now": kb.druginteraction_set.count(),
+            "sample": sample_results,
+        })
+
+
+class UploadGuidelines(RxView):
+    def post(self, request):
+        kb = KbVersion.objects.filter(is_current=True).first()
+        if not kb:
+            return Response({"error": "No active KB version available"}, status=400)
+
+        file_obj = request.FILES.get("file")
+        raw_text = request.data.get("csv_text", "")
+        title = request.data.get("title", "").strip() or "Hospital Clinical Guideline"
+        doc_type = request.data.get("doc_type", "GUIDELINE").strip() or "GUIDELINE"
+        source = request.data.get("source", "Pharmacist_Upload").strip() or "Pharmacist_Upload"
+        version_str = request.data.get("version", timezone.now().strftime("%Y.%m")).strip()
+
+        if file_obj:
+            raw_bytes = file_obj.read()
+            filename = file_obj.name
+            try:
+                raw_text = raw_bytes.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raw_text = raw_bytes.decode("latin-1")
+        else:
+            if not raw_text.strip():
+                return Response({"error": "No guideline file or text provided"}, status=400)
+            raw_bytes = raw_text.encode("utf-8")
+            filename = f"{title.lower().replace(' ', '_')}.txt"
+
+        checksum = hashlib.sha256(raw_bytes).hexdigest() if raw_bytes else ""
+
+        with transaction.atomic():
+            doc = CorpusDocument.objects.create(
+                kb_version=kb,
+                title=title,
+                doc_type=doc_type,
+                source=source,
+                version=version_str,
+                license="Hospital Clinical Protocol / Clinical Guideline",
+                url="",
+                file_name=filename,
+                checksum=checksum,
+            )
+
+            chunks_created = 0
+            mentions_created = 0
+            sample_chunks = []
+
+            first_line = raw_text.strip().split("\n")[0] if raw_text.strip() else ""
+            is_csv = "," in first_line or "\t" in first_line
+
+            all_drugs = list(Drug.objects.filter(kb_version=kb))
+            drug_map = {d.normalized_name: d for d in all_drugs}
+
+            if is_csv:
+                f = io.StringIO(raw_text.strip())
+                reader = csv.reader(f)
+                headers = [h.strip().lower().replace(" ", "_") for h in next(reader, [])]
+                sec_idx = next((i for i, h in enumerate(headers) if h in ("section", "topic", "category", "heading", "title")), None)
+                text_idx = next((i for i, h in enumerate(headers) if h in ("text", "content", "guideline", "recommendation", "excerpt")), None)
+                drugs_idx = next((i for i, h in enumerate(headers) if h in ("drugs", "medications", "molecules", "mentions")), None)
+
+                if text_idx is None:
+                    text_idx = 1 if len(headers) > 1 else 0
+
+                for r_idx, row in enumerate(reader, start=1):
+                    if not row or len(row) <= text_idx:
+                        continue
+                    text_content = row[text_idx].strip()
+                    if not text_content:
+                        continue
+                    section_name = row[sec_idx].strip() if sec_idx is not None and len(row) > sec_idx else f"Section {r_idx}"
+                    specified_drugs = row[drugs_idx].split(",") if drugs_idx is not None and len(row) > drugs_idx else []
+
+                    chunk = CorpusChunk.objects.create(
+                        document=doc,
+                        section_path=section_name[:390],
+                        page=r_idx,
+                        text=text_content,
+                        text_hash=hashlib.sha256(text_content.encode("utf-8")).hexdigest(),
+                    )
+                    chunks_created += 1
+
+                    tagged_names = []
+                    for sd in specified_drugs:
+                        name_clean = sd.strip()
+                        if not name_clean:
+                            continue
+                        norm = normalize.normalize_text(name_clean)
+                        drug = drug_map.get(norm)
+                        if not drug:
+                            drug, _ = Drug.objects.get_or_create(
+                                kb_version=kb,
+                                normalized_name=norm,
+                                defaults={
+                                    "generic_name": name_clean.title(),
+                                    "source": source,
+                                    "nlem_listed": False,
+                                },
+                            )
+                            drug_map[norm] = drug
+                            all_drugs.append(drug)
+                        _, m_created = ChunkDrugMention.objects.get_or_create(chunk=chunk, drug=drug, defaults={"via": "direct"})
+                        if m_created:
+                            mentions_created += 1
+                            tagged_names.append(drug.generic_name)
+
+                    lower_text = text_content.lower()
+                    for d in all_drugs:
+                        if len(d.generic_name) > 3 and d.generic_name.lower() in lower_text:
+                            _, m_created = ChunkDrugMention.objects.get_or_create(chunk=chunk, drug=d, defaults={"via": "direct"})
+                            if m_created:
+                                mentions_created += 1
+                                if d.generic_name not in tagged_names:
+                                    tagged_names.append(d.generic_name)
+
+                    if len(sample_chunks) < 5:
+                        sample_chunks.append({
+                            "section": section_name,
+                            "text_preview": text_content[:120] + "...",
+                            "drugs_tagged": tagged_names[:6],
+                        })
+            else:
+                paragraphs = [p.strip() for p in raw_text.split("\n\n") if p.strip()]
+                for p_idx, para in enumerate(paragraphs, start=1):
+                    chunk = CorpusChunk.objects.create(
+                        document=doc,
+                        section_path=f"{title} - Part {p_idx}"[:390],
+                        page=p_idx,
+                        text=para,
+                        text_hash=hashlib.sha256(para.encode("utf-8")).hexdigest(),
+                    )
+                    chunks_created += 1
+                    tagged_names = []
+                    lower_text = para.lower()
+                    for d in all_drugs:
+                        if len(d.generic_name) > 3 and d.generic_name.lower() in lower_text:
+                            _, m_created = ChunkDrugMention.objects.get_or_create(chunk=chunk, drug=d, defaults={"via": "direct"})
+                            if m_created:
+                                mentions_created += 1
+                                tagged_names.append(d.generic_name)
+
+                    if len(sample_chunks) < 5:
+                        sample_chunks.append({
+                            "section": f"Part {p_idx}",
+                            "text_preview": para[:120] + "...",
+                            "drugs_tagged": tagged_names[:6],
+                        })
+
+        return Response({
+            "status": "success",
+            "document_id": doc.id,
+            "document_title": doc.title,
+            "doc_type": doc.doc_type,
+            "chunks_created": chunks_created,
+            "drug_mentions_tagged": mentions_created,
+            "sample_chunks": sample_chunks,
+        })
+
+
+class DatasetTemplates(RxView):
+    def get(self, request):
+        interactions_template = (
+            "drug_a,drug_b,severity,notes\n"
+            "Amiodarone,Ciprofloxacin,Major,High risk of QT prolongation and torsades de pointes ventricular arrhythmia\n"
+            "Metformin,Iodinated Contrast,Major,Risk of fatal lactic acidosis and acute nephrotoxicity\n"
+            "Warfarin,Tramadol,Moderate,Elevated INR and increased bleeding risk\n"
+            "Levothyroxine,Calcium Carbonate,Moderate,Decreased levothyroxine gastrointestinal absorption\n"
+            "Atorvastatin,Clarithromycin,Major,Marked increase in statin plasma concentration; risk of rhabdomyolysis\n"
+        )
+        guidelines_template = (
+            "section,text,drugs\n"
+            "Cardiology - QT Risk Protocol,Concomitant administration of Amiodarone and Ciprofloxacin markedly increases the risk of QT interval prolongation and torsades de pointes ventricular arrhythmia. Concurrent use is contraindicated or requires continuous telemetry monitoring with electrolyte correction.,Amiodarone, Ciprofloxacin\n"
+            "Endocrinology - Metformin & Radiocontrast,Patients receiving Metformin must withhold medication at the time of or prior to iodinated radiocontrast imaging procedures and for 48 hours post-procedure due to acute renal failure and fatal lactic acidosis risk.,Metformin\n"
+            "Hematology - Warfarin Potentiation,Tramadol inhibits CYP2D6 and may enhance the hypoprothrombinemic effect of Warfarin. Monitor INR closely within 3 to 5 days of initiation.,Warfarin, Tramadol\n"
+        )
+        return Response({
+            "interactions_template": interactions_template,
+            "guidelines_template": guidelines_template,
+        })
 
 
 # ------------------------------------------------------------------------------ metrics

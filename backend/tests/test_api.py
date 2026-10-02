@@ -194,3 +194,78 @@ def test_explain_caps_llm_findings_but_keeps_every_db_fact(client, settings):
     e = client.post("/api/v1/explain", {"prescription_id": b["id"]}, format="json").json()
     db_claims = {c["finding_ordinal"] for c in e["explanation"]["claims"] if c["source_type"] == "DATABASE"}
     assert db_claims == {f["ordinal"] for f in b["findings"]} and len(db_claims) > 2
+
+
+def test_translate_explanation(client):
+    """Verify that Hindi and Malayalam regional translation endpoints return localized findings and clinical claims."""
+    b = check(client, MAIN).json()
+    client.post("/api/v1/explain", {"prescription_id": b["id"]}, format="json")
+    
+    # Test Hindi
+    res_hi = client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": "hi"}, format="json")
+    assert res_hi.status_code == 200
+    data_hi = res_hi.json()
+    assert data_hi["language"] == "hi"
+    assert "translated_findings" in data_hi
+    assert len(data_hi["translated_findings"]) > 0
+    first_hi = data_hi["translated_findings"][0]
+    assert "severity_hi" in first_hi
+    assert "db_claim_hi" in first_hi
+    assert "clinical_advice_hi" in first_hi
+
+    # Test Malayalam
+    res_ml = client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": "ml"}, format="json")
+    assert res_ml.status_code == 200
+    data_ml = res_ml.json()
+    assert data_ml["language"] == "ml"
+    assert data_ml["language_name"] == "മലയാളം (Malayalam)"
+    first_ml = data_ml["translated_findings"][0]
+    assert "ഗുരുതരം" in first_ml["severity_ml"] or "മിതമായത്" in first_ml["severity_ml"] or "ലഘുവായത്" in first_ml["severity_ml"]
+    assert "ഡിഡിഇന്റർ" in first_ml["db_claim_ml"]
+    assert "ഐസിഎംആർ" in first_ml["clinical_advice_ml"]
+
+
+def test_upload_interactions_and_immediate_check(client):
+    """Pharmacist uploads a custom CSV pair (Amiodarone + Ciprofloxacin) and /check immediately detects it."""
+    csv_content = (
+        "drug_a,drug_b,severity,notes\n"
+        "Amiodarone,Ciprofloxacin,Major,Torsades de pointes ventricular arrhythmia risk\n"
+    )
+    res = client.post("/api/v1/kb/interactions/upload", {"csv_text": csv_content}, format="json")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["added_interactions"] >= 1
+
+    # Now verify that checking a prescription with Amiodarone and Ciprofloxacin immediately detects this Major finding!
+    rx_text = "Rx\n1. Tab Amiodarone 200 mg OD\n2. Tab Ciprofloxacin 500 mg BD"
+    check_res = check(client, rx_text)
+    assert check_res.status_code == 201
+    check_body = check_res.json()
+    assert check_body["priority"] == "P1"
+    findings = check_body["findings"]
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["severity"] == "Major"
+    assert {f["drug_a"], f["drug_b"]} == {"Amiodarone", "Ciprofloxacin"}
+
+
+def test_upload_guidelines(client):
+    """Pharmacist uploads custom guideline CSV and chunks/mentions are indexed."""
+    csv_content = (
+        "section,text,drugs\n"
+        "Cardiology - Arrhythmia,Amiodarone and Ciprofloxacin should not be co-prescribed due to fatal QT prolongation risk.,Amiodarone, Ciprofloxacin\n"
+    )
+    res = client.post("/api/v1/kb/guidelines/upload", {
+        "csv_text": csv_content,
+        "title": "Hospital Cardiology Protocol 2026",
+    }, format="json")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["chunks_created"] == 1
+    assert data["drug_mentions_tagged"] >= 1
+
+
+
+

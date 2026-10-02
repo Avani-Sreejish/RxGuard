@@ -1,5 +1,11 @@
 # RxGuard Evaluation Report
 
+Generated 2026-10-01 21:59 UTC by `eval/run.py` - evaluation run #4.
+
+- KB version: **v1** · git: `297e44f` · prompts: `drug_extraction@v1,normalization_choice@v1,explanation_claims@v1,followup_router@v1,followup_answer@v1`
+- LLM: **AVAILABLE** · chain: `gemini-3.5-flash-lite` -> `gemini-3.5-flash` -> template
+- Retrieval: hybrid FAISS + BM25 (RRF), dense cutoff 0.8 (reranker off)
+- Environment: in-process Django test client against the seeded database (sqlite3), 54 requests in 27.7 s. Latency here is NOT the load test (see loadtest/REPORT.md).
 Generated 2026-10-01 13:21 UTC by `eval/run.py` - evaluation run #13.
 
 - KB version: **v4** · git: `3da2da9` · prompts: `drug_extraction@v1,normalization_choice@v1,explanation_claims@v1,followup_router@v1,followup_answer@v2`

@@ -7,7 +7,7 @@ interface ProveData {
   finding: Finding;
   prescription_id: number;
   database_record: { interaction_id: number; drug_a: string; drug_a_ddinter_id: string; drug_b: string;
-    drug_b_ddinter_id: string; severity: string; source: string; source_record_id: string; kb_version: string;
+    drug_b_ddinter_id: string; severity: string; source: string; source_record_id: string; source_file?: string; kb_version: string;
     table: string };
   sources: { name: string; version: string; license: string; url: string; retrieved_at: string; checksum: string }[];
   explanation: null | { id: number; mode: string; model: string; prompt_version: string; correlation_id: string;
@@ -90,6 +90,10 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
                 <dd className="mono">
                   {d.database_record.source} {d.database_record.source_record_id}
                 </dd>
+                <dt>source file</dt>
+                <dd className="mono" style={{ color: "var(--accent)", fontWeight: 700 }}>
+                  📄 {d.database_record.source_file || "ddinter_downloads_code_*.csv"}
+                </dd>
                 <dt>KB version</dt>
                 <dd className="mono">{d.database_record.kb_version}</dd>
               </dl>
@@ -98,7 +102,12 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
               <h4>Guideline chunks (retrieved, not AI-generated)</h4>
               {d.finding.evidence.length === 0 ? (
                 <div>
-                  <Insufficient /> <span className="small">{d.finding.evidence_message}</span>
+                  <Insufficient /> <span className="small">{d.finding.evidence_message || "No guideline chunks retrieved."}</span>
+                  {!d.explanation && (
+                    <div className="small muted" style={{ marginTop: 6, fontStyle: "italic", background: "var(--surface)", padding: "6px 10px", borderRadius: 4 }}>
+                      💡 <b>Note:</b> Click the <b>"Explain"</b> button at the top right of the prescription view to run clinical guideline retrieval. Retrieved excerpts from guideline PDFs (e.g., <code>icmr_stw_cardiology_all.pdf</code>, <code>nlem2022.pdf</code>) with exact page numbers and highlighted cited text will appear here.
+                    </div>
+                  )}
                 </div>
               ) : (
                 d.finding.evidence.map((e) => (
@@ -110,14 +119,19 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
             <li>
               <h4>Source documents, versions and licences</h4>
               {d.sources.map((s) => (
-                <div key={s.name} className="small">
+                <div key={s.name} className="small" style={{ marginBottom: 6 }}>
                   <b>{s.name}</b> · {s.version} · sha256 <span className="mono">{s.checksum.slice(0, 12)}…</span>
+                  {s.name.includes("DDInter") && (
+                    <div className="mono" style={{ fontSize: 11, color: "var(--accent)", marginTop: 2 }}>
+                      Included Files: ddinter_downloads_code_A.csv … ddinter_downloads_code_V.csv (160k pairs)
+                    </div>
+                  )}
                   <div className="muted">{s.license}</div>
                 </div>
               ))}
               {[...new Map(d.finding.evidence.map((e) => [e.document, e])).values()].map((e) => (
                 <div key={e.document} className="small" style={{ marginTop: 4 }}>
-                  <b>{e.document}</b> · {e.source} · {e.version}
+                  <b>{e.document}</b> {e.file_name && <span className="mono">({e.file_name})</span>} · {e.source} · {e.version}
                   <div className="muted">{e.license}</div>
                 </div>
               ))}
@@ -177,21 +191,100 @@ function ClaimRow({ c }: { c: Claim }) {
 }
 
 export function ChunkCard({ e, span }: { e: EvidenceCard; span?: string }) {
+  const verifiedSpan = span || e.support_span;
   return (
-    <div className="evidence">
-      <div className="meta">
-        <b>{e.document}</b> · {e.section} {e.page ? `· p.${e.page}` : ""} · chunk {e.chunk_id}
-        {e.score != null ? ` · retrieval score ${e.score.toFixed(3)}` : ""}
+    <div
+      className="evidence"
+      style={{
+        borderLeft: "3px solid var(--accent)",
+        background: "var(--accent-soft)",
+        borderRadius: "var(--radius)",
+        padding: "10px 14px",
+        marginTop: 8,
+      }}
+    >
+      <div
+        className="meta"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 6,
+        }}
+      >
+        <div>
+          <span
+            style={{
+              fontSize: 10.5,
+              fontWeight: 800,
+              color: "var(--accent)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              marginRight: 6,
+            }}
+          >
+            📄 Verified Source File:
+          </span>
+          <b style={{ color: "var(--text)", fontSize: 13 }}>{e.file_name || e.document}</b>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          {e.doc_type && <span className="badge synth" style={{ fontSize: 9.5 }}>{e.doc_type}</span>}
+          {e.page != null && <span className="badge esc" style={{ fontSize: 9.5 }}>Page {e.page}</span>}
+          <span className="mono small" style={{ color: "var(--muted)" }}>Chunk #{e.chunk_id}</span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>
+        <b>Section / Policy Context:</b> {e.section}
+        {e.score != null ? ` · Retrieval score: ${e.score.toFixed(3)}` : ""}
         {e.retrieval_mode === "fulltext" ? " · FULLTEXT (degraded)" : ""}
         {e.matched_via && Object.keys(e.matched_via).length > 0 && (
-          <div>
-            matched: {Object.entries(e.matched_via).map(([d, v]) => `${d} (${v.replace("class:", "via class term “") + (v.startsWith("class:") ? "”" : "")})`).join(" · ")}
-          </div>
+          <span style={{ marginLeft: 8 }}>
+            (matched: {Object.entries(e.matched_via).map(([d, v]) => `${d} via “${v}”`).join(" · ")})
+          </span>
         )}
       </div>
-      <blockquote>
-        <Highlight text={e.text} span={span || e.support_span} />
-      </blockquote>
+
+      {verifiedSpan ? (
+        <div
+          style={{
+            margin: "6px 0",
+            padding: "8px 10px",
+            background: "rgba(59, 130, 246, 0.12)",
+            borderRadius: "var(--radius)",
+            border: "1px solid rgba(59, 130, 246, 0.35)",
+          }}
+        >
+          <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--accent)", marginBottom: 3 }}>
+            🔍 EXACT DATA USED TO VERIFY (CITED TEXT):
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.5 }}>
+            "{verifiedSpan}"
+          </div>
+        </div>
+      ) : null}
+
+      <details style={{ marginTop: 6, fontSize: 12, cursor: "pointer" }}>
+        <summary style={{ color: "var(--muted)", fontWeight: 600, fontSize: 11 }}>
+          View full source passage ({e.text.length} chars)
+        </summary>
+        <blockquote
+          style={{
+            marginTop: 6,
+            padding: "8px 10px",
+            background: "var(--surface)",
+            borderRadius: "var(--radius)",
+            maxHeight: 180,
+            overflow: "auto",
+            fontSize: 12,
+            lineHeight: 1.55,
+          }}
+        >
+          <Highlight text={e.text} span={verifiedSpan} />
+        </blockquote>
+      </details>
     </div>
   );
 }

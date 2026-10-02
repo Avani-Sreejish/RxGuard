@@ -20,6 +20,7 @@ export interface EvidenceCard {
   url: string;
   section: string;
   page: number | null;
+  file_name?: string;
   text: string;
   score: number | null;
   support_span?: string;

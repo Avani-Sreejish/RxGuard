@@ -15,8 +15,32 @@ export default function Detail({ id }: { id: number }) {
   const [busy, setBusy] = useState("");
   const [sel, setSel] = useState<number | null>(null);
   const [prove, setProve] = useState<number | null>(null);
-  const [auditKey, setAuditKey] = useState(0);
   const [gate, setGate] = useState<string[]>([]);
+  const [auditKey, setAuditKey] = useState(0);
+  const [lang, setLang] = useState<"en" | "hi" | "ml">("en");
+  const [translations, setTranslations] = useState<Record<string, Record<number, any>>>({});
+  const [transLoading, setTransLoading] = useState(false);
+
+  const toggleLanguage = async (l: "en" | "hi" | "ml") => {
+    setLang(l);
+    if (l !== "en" && !translations[l]) {
+      setTransLoading(true);
+      try {
+        const res = await api<{ translated_findings: any[] }>(`/api/v1/prescriptions/${id}/translate`, {
+          body: { language: l },
+        });
+        const map: Record<number, any> = {};
+        res.translated_findings.forEach((tf: any) => {
+          map[tf.finding_id] = tf;
+        });
+        setTranslations((prev) => ({ ...prev, [l]: map }));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setTransLoading(false);
+      }
+    }
+  };
 
   const load = useCallback(() => {
     api<Prescription>(`/api/v1/prescriptions/${id}`).then(setRx).catch((e) => setErr(e.message));
@@ -99,7 +123,33 @@ export default function Detail({ id }: { id: number }) {
               { body: drugId ? { drug_id: drugId } : { not_in_database: true } }))} />
 
           <div className="card">
-            <h2><span className="step">3</span>Findings</h2>
+            <div className="row spread" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}><span className="step">3</span>Findings ({rx.findings.length})</h2>
+              <div className="row" style={{ gap: 4 }}>
+                <span className="small muted">Language:</span>
+                <button
+                  type="button"
+                  className={`btn sm ${lang === "en" ? "primary" : ""}`}
+                  onClick={() => toggleLanguage("en")}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  className={`btn sm ${lang === "hi" ? "primary" : ""}`}
+                  onClick={() => toggleLanguage("hi")}
+                >
+                  {transLoading && lang === "hi" ? <span className="spin" /> : "🇮🇳 हिंदी"}
+                </button>
+                <button
+                  type="button"
+                  className={`btn sm ${lang === "ml" ? "primary" : ""}`}
+                  onClick={() => toggleLanguage("ml")}
+                >
+                  {transLoading && lang === "ml" ? <span className="spin" /> : "🌴 മലയാളം"}
+                </button>
+              </div>
+            </div>
             {rx.findings.length === 0 && (
               <p className="muted">
                 {rx.absent_pairs_wording} for any of the {rx.pairs_checked} pair(s) checked. This is not a statement that
@@ -124,7 +174,12 @@ export default function Detail({ id }: { id: number }) {
               </div>
             )}
             {rx.findings.map((f) => (
-              <div key={f.id} className={`finding ${sel === f.id ? "sel" : ""}`} onClick={() => setSel(f.id)}>
+              <div
+                key={f.id}
+                id={`finding-${f.id}`}
+                className={`finding ${sel === f.id ? "sel" : ""}`}
+                onClick={() => setSel(f.id)}
+              >
                 <div className="row spread">
                   <span className="pair">
                     #{f.ordinal} {f.drug_a} ↔ {f.drug_b}
@@ -139,17 +194,86 @@ export default function Detail({ id }: { id: number }) {
                 <div className="claim">
                   <DbFact />
                   <span className="txt">
-                    Interaction recorded in the structured database: <Sev s={f.severity} /> (as recorded) ·{" "}
-                    <span className="mono small">
-                      {f.source} {f.kb_version} · record {f.source_record_id}
-                    </span>
+                    <b>Structured Verification:</b> Interaction verified in database <b>{f.source}</b> (<Sev s={f.severity} />) · Record ID: <code className="mono">{f.source_record_id}</code> · KB: <code>{f.kb_version}</code>
                   </span>
                 </div>
+                {lang !== "en" && translations[lang]?.[f.id] && (
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      background: "var(--accent-soft)",
+                      borderRadius: "var(--radius)",
+                      marginTop: 8,
+                      border: "1px solid var(--accent)",
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                      <span className="badge esc" style={{ fontSize: 10 }}>
+                        {lang === "hi" ? "🇮🇳 हिंदी अनुवाद" : "🌴 മലയാളം പരിഭാഷ"} (Regional Translation)
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: 12 }}>
+                        {translations[lang][f.id].severity_translated || translations[lang][f.id].severity_hi}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)" }}>
+                      {translations[lang][f.id].db_claim_translated || translations[lang][f.id].db_claim_hi}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+                      💡 <b>{lang === "hi" ? "नैदानिक सलाह" : "ക്ലിനിക്കൽ നിർദ്ദേശം"}:</b>{" "}
+                      {translations[lang][f.id].clinical_advice_translated || translations[lang][f.id].clinical_advice_hi}
+                    </div>
+                  </div>
+                )}
                 {claimsFor(f).filter((c) => c.source_type === "RAG_CHUNK").map((c) => (
-                  <div className="claim" key={c.claim_id}>
-                    <AiVerified />
-                    <span className="txt">{c.text}</span>
-                    <span className="mono small">{c.claim_id} → chunk {c.chunk?.chunk_id}</span>
+                  <div
+                    className="claim"
+                    key={c.claim_id}
+                    style={{
+                      display: "block",
+                      margin: "8px 0",
+                      padding: "10px 14px",
+                      background: "var(--surface)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius)",
+                    }}
+                  >
+                    <div className="row spread" style={{ marginBottom: 4 }}>
+                      <div className="row" style={{ gap: 6 }}>
+                        <AiVerified />
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{c.text}</span>
+                      </div>
+                      <span className="mono small" style={{ color: "var(--muted)" }}>{c.claim_id}</span>
+                    </div>
+                    {c.chunk && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 11.5,
+                          background: "var(--accent-soft)",
+                          padding: "8px 12px",
+                          borderRadius: "var(--radius)",
+                          borderLeft: "3px solid var(--accent)",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>
+                            📄 <b>Verified Source File:</b> {c.chunk.file_name || c.chunk.document} {c.chunk.page != null ? `· Page ${c.chunk.page}` : ""}
+                          </span>
+                          <span className="badge synth" style={{ fontSize: 9.5 }}>Chunk #{c.chunk.chunk_id}</span>
+                        </div>
+                        {c.chunk.section && (
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                            <b>Section / Guideline Context:</b> {c.chunk.section}
+                          </div>
+                        )}
+                        {c.support_span && (
+                          <div style={{ marginTop: 6, color: "var(--text)" }}>
+                            🔍 <b>Exact Data Used to Verify:</b>{" "}
+                            <mark style={{ padding: "2px 6px", borderRadius: 3, fontWeight: 600 }}>"{c.support_span}"</mark>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {f.evidence_status === "INSUFFICIENT" && (
@@ -181,9 +305,19 @@ export default function Detail({ id }: { id: number }) {
         </div>
 
         <div>
-          <div className="card">
+          <div className="card elevated">
             <h2><span className="step">2</span>Interaction map</h2>
-            <InteractionMap rx={rx} selected={sel} onSelect={setSel} />
+            <InteractionMap
+              rx={rx}
+              selected={sel}
+              onSelect={(fid) => {
+                setSel(fid);
+                const el = document.getElementById(`finding-${fid}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+              }}
+            />
           </div>
           <div className="card">
             <h2>Why this priority</h2>
