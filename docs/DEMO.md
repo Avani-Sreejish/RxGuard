@@ -1,19 +1,22 @@
-# 5-minute demo runbook (maps spec section 24 onto the built UI)
+# 5-minute demo runbook
 
-Sign in as `admin` (Judge Attack toggles need an admin and `DEMO_TOGGLES_ENABLED=1`).
+Sign in as `admin` (also shows the **Knowledge base** menu). All prescriptions are synthetic.
 
 | Time | Click | Point to |
 |---|---|---|
 | 0:00–0:30 | (slide) | A five-drug prescription with brand names: which pair first, and can you prove why? |
-| 0:30–1:15 | **New check → Demo loader → "Demo prescription" → Run check** | Resolution panel: *Synwarf* → Warfarin (SYNTHETIC badge), *amlodipne* → Amlodipine (fuzzy 94.7), *Synflam* → Ibuprofen + Acetaminophen (combination), *Zyntrofex* UNRESOLVED |
-| 1:15–2:00 | Detail page header + map | green "/check: 0 LLM tokens"; map with Warfarin hub, Acetaminophen duplicate ring, dashed "?" node; P1 badge with rule IDs in "Why this priority" |
-| 2:00–2:45 | **Explain**, then **Prove why** on Warfarin ↔ Acetylsalicylic acid | DATABASE FACT row → DDInter record id → evidence chunk with highlighted span; an INSUFFICIENT EVIDENCE finding; any "claim(s) removed by the verifier" line |
-| 2:45–3:15 | **Demo loader → "Red-flag note"**, then the Follow-up box: "Why was the second one flagged?" | red RED_FLAG banner while findings still show; tool trace `get_finding({finding_ordinal: 2})` |
-| 3:15–3:50 | **Judge Attack**: Prompt-injection document · Pediatric dosing · LLM unavailable | "interaction set identical: true" + red banner; fixed dosing refusal + escalations; TEMPLATE MODE with identical findings |
-| 3:50–4:30 | Back on the demo prescription: Acknowledge one finding, Escalate another, **Complete review** (409 gate), confirm Zyntrofex as "Not in database", Complete again | "Audit integrity ✓", "reviewed against KB vN" (the current version) on each review |
-| 4:30–5:00 | EVAL_REPORT.md, loadtest/REPORT.md, Observability page | only measured numbers; NOT MEASURED rows stated plainly |
+| 0:30–1:15 | **New check → Try an example → "Demo prescription (brand, misspelling, combination, unknown drug)" → Check for interactions** | Medicines list: *Synwarf* → Warfarin and *Synflam* → Ibuprofen + Acetaminophen (SYNTHETIC DEMO DATA badges), *amlodipne* read as Amlodipine "from a misspelling, please check", *Zyntrofex* "not recognised — which medicine is it?" |
+| 1:15–2:00 | Review page header | One-line summary ("N interactions between M medicines, K Major"), the **Act now** label, "0 of N required steps done" |
+| 2:00–2:45 | **Needs your action** cards, then **How was this found?** on Warfarin + Acetylsalicylic acid | Database fact in plain words; "What the guidelines say" with the *AI summary · verified* tag and the source quote; in the drawer: database record → DDInter source file → guideline passage → document licence |
+| 2:45–3:15 | Top-bar **हिंदी / മലയാളം** | Each interaction's database record in Hindi / Malayalam; medicine names stay in Latin script |
+| 3:15–3:50 | **Ask a question** tab: "Why was the second one flagged?" · then **New check → Try an example → "Prompt Injection Attack Defense"** | Session memory resolves "the second one"; the injected line is flagged with a red banner and never becomes a drug |
+| 3:50–4:30 | Acknowledge one card, Escalate another, **Complete review** (blocked until every Act-now item has an action), confirm *Zyntrofex* as "It is not in the database", Complete again | The gate message, then "Review completed"; **History** tab: hash-chained audit trail, "Chain intact" |
+| 4:30–5:00 | EVAL_REPORT.md, loadtest/REPORT.md | only measured numbers; FAIL and NOT MEASURED rows stated plainly |
+
+Failure behaviour (LLM down, vector index down, database down) is exercised by `eval/run.py` and can be triggered
+by an admin with the `X-RxGuard-Simulate` header when `DEMO_TOGGLES_ENABLED=1`; there is no UI screen for it.
 
 Tamper demo (optional, 20 s): `docker compose exec mysql mysql -urxguard -p rxguard -e "UPDATE audit_logs SET payload='{}' WHERE prescription_id=<id> AND seq=3"`
-then reload the detail page → **TAMPERED at seq 3**.
+then open the prescription's **History** tab → **TAMPERED at seq 3**.
 
 Backups: local `docker compose` copy and a recorded video (spec: rehearse three times on the live deployment).

@@ -4,7 +4,7 @@ The LLM explains · tools provide facts · deterministic rules make safety-criti
 
 ```mermaid
 flowchart TD
-  FE[Frontend: queue, map, Prove Why, review, audit, Judge Attack, observability] -->|HTTPS + X-Request-ID| NG[nginx: static build + /api proxy]
+  FE[Frontend: queue, new check, review page, map, ask, audit history, How was this found, admin uploads] -->|HTTPS + X-Request-ID| NG[nginx: static build + /api proxy]
   NG --> API[Django REST Framework: auth, throttling, correlation IDs, error schema]
   API --> VAL[Pydantic validation: requests + every AI output]
   VAL --> AG[LangGraph graphs: check / explain; state saved to agent_steps per node]

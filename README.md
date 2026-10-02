@@ -55,7 +55,8 @@ cd backend && ../.venv/Scripts/python manage.py migrate && ../.venv/Scripts/pyth
 cd ../frontend && npm install && npm run dev # UI on :5173 (proxies /api)
 ```
 
-Sign in as `pharmacist` (or `admin` for the Judge Attack failure toggles) with `DEMO_PHARMACIST_PASSWORD`.
+Sign in as `pharmacist` (or `admin`, which also sees the **Knowledge base** menu for uploads) with
+`DEMO_PHARMACIST_PASSWORD`.
 
 ### Docker (web + mysql + frontend)
 
@@ -95,7 +96,7 @@ python scripts/calibrate_retrieval.py      # retrieval-threshold calibration tab
 | `POST /api/v1/reviews/{finding_id}` | ACKNOWLEDGE / ESCALATE / REQUEST_MORE_EVIDENCE / MARK_FOR_FOLLOW_UP |
 | `POST /api/v1/escalations` | manual escalation |
 | `GET /api/v1/audit/{id}`, `/audit/{id}/verify` | hash-chained trail; VALID / TAMPERED + first broken seq |
-| `GET /api/v1/metrics/cost`, `/metrics/latency`, `/metrics/overview` | cost/query, P50/P95/P99, observability |
+| `GET /api/v1/metrics/cost`, `/metrics/latency`, `/metrics/overview` | cost/query, P50/P95/P99, observability (API only; no UI screen) |
 | `GET /healthz`, `/readyz` | liveness; MySQL + KB version + FAISS readiness (never calls the LLM) |
 
 Errors always use `{"error": {"code", "message", "correlation_id", "details"?}}`; every response carries
@@ -186,16 +187,19 @@ All prescriptions in this repo are synthetic.
 - Conflict detection is narrow (contraindication wording in a chunk vs Minor/Unknown severity) and was not
   triggered by any case on real data.
 - Red-flag, dosing and injection detection are rule-based and can miss unusual phrasings.
-- **LLM paths are measured only on the test fixture so far:** with a Gemini key, `/check` → `/explain` → `/ask`
-  ran end-to-end (6 calls, all on `gemini-3.5-flash-lite`, 0.7–1.7 s each, every claim through the verifier). The
-  full eval, load-test run B and real cost per query still need a run against the seeded KB. EVAL_REPORT.md
-  predates the Gemini provider. Gemini prices are not set by default (`LLM_PRICES`), so USD costs read $0 until
-  they are.
+- **LLM paths are measured single-user only:** EVAL_REPORT run #14 ran against the seeded KB with
+  `gemini-3.5-flash-lite` (16 real LLM calls). Load-test run B (real LLM under concurrency) and real cost per query
+  are still NOT MEASURED. Gemini prices are not set by default (`LLM_PRICES`), so USD costs read $0 until they are.
 - **Free-tier Gemini quotas are small** (e.g. 20 requests/day for `gemini-3.8-flash`); a 429 falls through the chain
   to template mode, so flags never depend on quota, but demos and eval runs should use a model with headroom.
 - **The cross-encoder cutoff is uncalibrated** and reranking is off by default; the hybrid (BM25 + RRF) effect on
   Recall@5 has not been re-measured on the real corpus yet.
-- The Malayalam/Hindi explanation layer (stretch) is not built.
+- **Malayalam / Hindi is partial:** the language switch renders each finding's database record with fixed,
+  hand-written wording (no LLM, drug names kept in Latin script). Guideline text, AI summaries and the interface
+  labels stay in English. Not evaluated by native-speaker pharmacists.
+- **Guideline evidence is looked up automatically** (one `/explain` call, ≤3 LLM calls) the first time a
+  prescription with findings is opened, so a new review page shows "Looking up guideline evidence…" for a few
+  seconds. Flags and actions are usable meanwhile.
 - No clinical validation with practising pharmacists.
 - **Knowledge-base uploads (admin only)** add rows to the *current* KB version instead of creating a new one, so
   "reviewed against KB vN" covers uploads made after the review. Each upload is recorded in `data_sources`
@@ -218,24 +222,26 @@ All prescriptions in this repo are synthetic.
 | Must | Django DRF endpoint | Built |
 | Must | MySQL-backed session memory | Built: sessions + session_messages; "the second one" resolves |
 | Must | Pydantic on every AI output | Built: DrugExtraction, NormalizationChoice, ExplanationClaims, ToolPlan |
-| Must | Eval on 20 questions | Built: 22 cases + 15 adversarial; see EVAL_REPORT |
+| Must | Eval on 20 questions | Built: 22 cases + 15 adversarial, run #14 on the seeded KB with Gemini: 65 checks, **2 FAIL** (B citation correctness 83% vs 90%; C retrieval Recall@5 0.778 vs 0.8) |
 | Must | README + architecture diagram | This file + docs/architecture.md |
-| Should | Docker + live URL | Compose stack built and run locally; **no public URL deployed from this environment** |
+| Should | Docker + live URL | Compose stack built and run locally (web + mysql + frontend; Caddy for HTTPS); **no public URL deployed yet** |
 | Should | Structured logs + correlation IDs | Built: JSON logs; X-Request-ID on requests, tool/LLM calls, audit rows |
 | Should | Fallback chain | Built: Gemini flash-lite → Gemini flash (or Claude) → template; FAISS → FULLTEXT; reranker → dense cutoff; MySQL → fail closed |
-| Should | P50/P95 latency | Measured on localhost Docker: `/check` P95 1,068 ms (run A, PASS); `/explain` P95 5,029 ms with a mocked 2 s LLM (run C, PASS with caveats); run B NOT MEASURED |
+| Should | P50/P95 latency | Measured on localhost Docker: `/check` P95 1,068 ms (run A, 20 users, PASS); `/explain` P95 5,029 ms with a mocked 2 s LLM (run C, PASS with caveats); `/explain` with real Gemini, single user: P50 3.9 s, P95 5.5 s (n=10, PASS); run B under load NOT MEASURED |
 | Should | Adversarial inputs | 15-case bank automated in the eval |
 | Stretch | Human-in-the-loop | Built: review actions, P1 gate, item confirmation |
 | Stretch | Load-test report | Runs A and C (mocked LLM); run B NOT MEASURED |
-| Stretch | Prompt versioning with eval scores | prompt_versions + evaluation_runs per prompt version |
-| Stretch | Regional language | Not built |
+| Stretch | Prompt versioning with eval scores | prompt_versions + evaluation_runs per prompt version (`explanation_claims@v2` scored in run #14) |
+| Stretch | Regional language | Partial: Hindi / Malayalam rendering of each finding's database record (fixed wording, no LLM); not evaluated |
 
 ## Repository layout
 
 ```
 backend/   Django project (api/ = models, views, serializers; engine/ = pipeline, tools, safety, verifier, gateway;
            kbload/ = DDInter/NLEM/corpus loaders; tests/)
-frontend/  React + Vite UI (queue, detail with map/Prove Why/review/audit, Judge Attack, observability, sources)
+frontend/  React + Vite pharmacist UI: review queue, new check, review page (medicines, interactions with guideline
+           evidence and actions, map, follow-up questions, audit history, "How was this found?"), admin uploads,
+           sources; EN / हिंदी / മലയാളം switch
 eval/      cases.yaml, run.py, labels_todo.csv (claims for two human labelers)
 loadtest/  locustfile.py, report.py, REPORT.md
 data/      corpus_manifest.yaml, curated/, synthetic/   (raw downloads, index and processed files are git-ignored)
