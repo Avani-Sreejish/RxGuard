@@ -231,7 +231,8 @@ All prescriptions in this repo are synthetic.
 backend/   Django project (api/ = models, views, serializers; engine/ = pipeline, tools, safety, verifier, gateway;
            kbload/ = DDInter/NLEM/corpus loaders; tests/)
 frontend/  React + Vite pharmacist UI: sign-in, new check (patient + prescription pad), review (medicines, findings,
-           guideline citations, human-in-the-loop actions, ask, audit), queue, patient history, evaluation.
+           guideline citations, human-in-the-loop actions, ask, audit), queue, patient history, reference data
+           (knowledge-base counts, sources, CSV/guideline import).
            `npm run build:demo` builds an offline demo with fictional data (no backend).
 eval/      cases.yaml, run.py, labels_todo.csv (claims for two human labelers)
 loadtest/  locustfile.py, report.py, REPORT.md

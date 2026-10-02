@@ -8,9 +8,11 @@ export class ApiError extends Error {
   correlationId: string;
   details: unknown;
   constructor(status: number, body: any) {
-    super(body?.error?.message ?? `HTTP ${status}`);
+    // Most endpoints send {"error": {"code", "message"}}; the dataset upload endpoints send {"error": "text"}.
+    const e = body?.error;
+    super((typeof e === "string" ? e : e?.message) ?? `HTTP ${status}`);
     this.status = status;
-    this.code = body?.error?.code ?? "error";
+    this.code = (typeof e === "string" ? "error" : e?.code) ?? "error";
     this.correlationId = body?.error?.correlation_id ?? "";
     this.details = body?.error?.details;
   }

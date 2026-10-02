@@ -59,16 +59,17 @@ const PAIRS: Record<string, Severity> = {
   "107|108": "Major",
   "111|112": "Major",
 };
+const PAIR_SOURCE: Record<string, string> = {};
 const pairKey = (a: number, b: number) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 const drugById = (id: number) => DRUGS.find((d) => d.id === id)!;
 
-interface DemoEvidence { cards: Omit<EvidenceCard, "chunk_id">[]; claim: string; span: string }
+interface DemoEvidence { cards: Omit<EvidenceCard, "chunk_id">[]; claim?: string; span?: string }
 const EVIDENCE: Record<string, DemoEvidence> = {
   "101|102": {
     cards: [{
       document: "ICMR Standard Treatment Workflow: Stroke", doc_type: "ICMR_STW", source: "ICMR", version: "2022",
       license: "© ICMR and DHR, MoHFW", url: "https://www.icmr.gov.in/standard-treatment-workflows-stws",
-      section: "Secondary prevention › Antithrombotic therapy", page: 2,
+      section: "Secondary prevention › Antithrombotic therapy", page: 2, file_name: "ICMR_STW_Stroke.pdf",
       text: "Combining an oral anticoagulant such as warfarin with an antiplatelet agent such as aspirin increases the risk of bleeding. Where both are prescribed, the indication for combined therapy should be reviewed and INR monitored closely.",
       score: 0.84, retrieval_mode: "hybrid", matched_via: { Warfarin: "direct", "Acetylsalicylic acid": "alias: aspirin" },
       label: "SOURCE TEXT (retrieved, not AI-generated)", sample: true,
@@ -80,7 +81,7 @@ const EVIDENCE: Record<string, DemoEvidence> = {
     cards: [{
       document: "ICMR Standard Treatment Workflows: Cardiology", doc_type: "ICMR_STW", source: "ICMR", version: "2023",
       license: "© ICMR and DHR, MoHFW. All rights reserved", url: "https://www.icmr.gov.in/standard-treatment-workflows-stws",
-      section: "Acute coronary syndrome › Antiplatelet therapy", page: 11,
+      section: "Acute coronary syndrome › Antiplatelet therapy", page: 11, file_name: "ICMR_STW_Cardiology_Vol1.pdf",
       text: "When gastric protection is needed in patients on clopidogrel, note that omeprazole may reduce the antiplatelet effect of clopidogrel. The choice of proton pump inhibitor should take this interaction into account.",
       score: 0.83, retrieval_mode: "hybrid", matched_via: { Clopidogrel: "direct", Omeprazole: "direct" },
       label: "SOURCE TEXT (retrieved, not AI-generated)", sample: true,
@@ -96,7 +97,7 @@ export const DEMO_TRANSLATIONS: Record<string, { ml: string; hi: string }> = {
     ml: "warfarin പോലുള്ള ഒരു ഓറൽ ആന്റികോയാഗുലന്റിനൊപ്പം aspirin പോലുള്ള ഒരു ആന്റിപ്ലേറ്റ്‌ലെറ്റ് മരുന്ന് നൽകുമ്പോൾ രക്തസ്രാവ സാധ്യത കൂടുന്നു. രണ്ടും നിർദ്ദേശിച്ചിട്ടുണ്ടെങ്കിൽ, സംയുക്ത ചികിത്സയുടെ ആവശ്യകത പുനഃപരിശോധിക്കുകയും INR സൂക്ഷ്മമായി നിരീക്ഷിക്കുകയും വേണം.",
     hi: "warfarin जैसे मौखिक एंटीकोएगुलेंट को aspirin जैसी एंटीप्लेटलेट दवा के साथ देने से रक्तस्राव का जोखिम बढ़ता है। जब दोनों लिखी गई हों, तो संयुक्त उपचार के संकेत की समीक्षा करनी चाहिए और INR की बारीकी से निगरानी करनी चाहिए।",
   },
-  [EVIDENCE["101|102"].claim]: {
+  [EVIDENCE["101|102"].claim!]: {
     ml: "warfarin, aspirin എന്നിവ ഒരുമിച്ച് നൽകുമ്പോൾ രക്തസ്രാവ സാധ്യത കൂടുമെന്നും INR സൂക്ഷ്മമായി നിരീക്ഷിക്കണമെന്നും സ്ട്രോക്ക് വർക്ക്ഫ്ലോ പറയുന്നു.",
     hi: "स्ट्रोक वर्कफ़्लो बताता है कि warfarin को aspirin के साथ देने से रक्तस्राव का जोखिम बढ़ता है और INR की बारीकी से निगरानी ज़रूरी है।",
   },
@@ -104,7 +105,7 @@ export const DEMO_TRANSLATIONS: Record<string, { ml: string; hi: string }> = {
     ml: "clopidogrel കഴിക്കുന്ന രോഗികൾക്ക് ആമാശയ സംരക്ഷണം ആവശ്യമുള്ളപ്പോൾ, omeprazole clopidogrel-ന്റെ ആന്റിപ്ലേറ്റ്‌ലെറ്റ് ഫലം കുറച്ചേക്കാം എന്ന് ശ്രദ്ധിക്കുക. പ്രോട്ടോൺ പമ്പ് ഇൻഹിബിറ്റർ തിരഞ്ഞെടുക്കുമ്പോൾ ഈ പ്രതിപ്രവർത്തനം കണക്കിലെടുക്കണം.",
     hi: "clopidogrel ले रहे मरीज़ों में जब पेट की सुरक्षा की ज़रूरत हो, तो ध्यान दें कि omeprazole, clopidogrel के एंटीप्लेटलेट प्रभाव को कम कर सकता है। प्रोटॉन पंप इनहिबिटर चुनते समय इस इंटरैक्शन को ध्यान में रखना चाहिए।",
   },
-  [EVIDENCE["107|108"].claim]: {
+  [EVIDENCE["107|108"].claim!]: {
     ml: "omeprazole clopidogrel-ന്റെ ആന്റിപ്ലേറ്റ്‌ലെറ്റ് ഫലം കുറച്ചേക്കാമെന്ന് കാർഡിയോളജി വർക്ക്ഫ്ലോ പറയുന്നു.",
     hi: "कार्डियोलॉजी वर्कफ़्लो बताता है कि omeprazole, clopidogrel के एंटीप्लेटलेट प्रभाव को कम कर सकता है।",
   },
@@ -269,7 +270,7 @@ function recompute(s: Stored, fresh = false) {
       const rule = sev === "Major" ? "R1" : sev === "Moderate" ? "R6" : "R9";
       findings.push(old ?? {
         id: nextFinding++, ordinal: 0, drug_a: drugById(ids[i]).name, drug_b: drugById(ids[j]).name, drug_a_id: ids[i], drug_b_id: ids[j],
-        severity: sev, severity_label: `${sev} (as recorded in DDInter)`, source: "DDInter", source_record_id: `DEMO-${ids[i]}-${ids[j]}`,
+        severity: sev, severity_label: `${sev} (as recorded in ${PAIR_SOURCE[k] ?? "DDInter"})`, source: PAIR_SOURCE[k] ?? "DDInter", source_record_id: `DEMO-${ids[i]}-${ids[j]}`,
         interaction_id: Number(`${ids[i]}${ids[j]}`), kb_version: KB, priority: RULES[rule][0], rule_id: rule,
         rule_description: RULES[rule][1], evidence_status: "PENDING", review_status: "pending", evidence: [], reviews: [],
       });
@@ -355,11 +356,12 @@ function runExplain(s: Stored) {
     });
     const ev = EVIDENCE[k];
     if (ev) {
-      f.evidence = ev.cards.map((c) => ({ ...c, chunk_id: nextChunk++, support_span: ev.span }));
+      f.evidence = ev.cards.map((c) => ({ ...c, chunk_id: nextChunk++, support_span: ev.span ?? "" }));
       f.evidence_status = "FOUND";
       delete f.evidence_message;
-      claims.push({ claim_id: `c${n++}`, text: ev.claim, source_type: "RAG_CHUNK", kept: true, drop_reason: "", support_score: 0.82,
-        support_span: ev.span, finding_ordinal: f.ordinal, badge: "AI EXPLANATION — VERIFIED", chunk: f.evidence[0] });
+      if (ev.claim)
+        claims.push({ claim_id: `c${n++}`, text: ev.claim, source_type: "RAG_CHUNK", kept: true, drop_reason: "", support_score: 0.82,
+          support_span: ev.span ?? "", finding_ordinal: f.ordinal, badge: "AI EXPLANATION — VERIFIED", chunk: f.evidence[0] });
     } else {
       f.evidence = [];
       f.evidence_status = "INSUFFICIENT";
@@ -488,6 +490,103 @@ for (const sd of SEED) {
 
 seeding = false;
 
+// ------------------------------------------------------------------ reference data imports (demo)
+const INT_TEMPLATE = "drug_a,drug_b,severity,notes\nWarfarin,Tramadol,Moderate,Elevated INR and increased bleeding risk\nAtorvastatin,Clarithromycin,Major,Higher statin exposure\n";
+const GUIDE_TEMPLATE = "section,text,drugs\nHematology - Warfarin potentiation,Tramadol may enhance the anticoagulant effect of Warfarin. Monitor INR closely after starting.,\"Warfarin, Tramadol\"\n";
+let addedDrugs = 0, addedPairs = 0, addedDocs = 0;
+
+async function fileText(form: FormData) {
+  const f = form.get("file") as File | null;
+  return f ? await f.text() : String(form.get("csv_text") ?? "");
+}
+
+function csvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const cells: string[] = [];
+    let cur = "", q = false;
+    for (const ch of line) {
+      if (ch === '"') q = !q;
+      else if (ch === "," && !q) { cells.push(cur.trim()); cur = ""; }
+      else cur += ch;
+    }
+    cells.push(cur.trim());
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function drugFor(name: string): { d: DemoDrug; created: boolean } {
+  const n = norm(name);
+  const hit = DRUGS.find((d) => d.aliases.includes(n));
+  if (hit) return { d: hit, created: false };
+  const d: DemoDrug = { id: 200 + DRUGS.length, name: name.replace(/\b\w/g, (c) => c.toUpperCase()), aliases: [n], nlem: null };
+  DRUGS.push(d);
+  ALIASES.push({ text: n, drugs: [d.id] });
+  addedDrugs++;
+  return { d, created: true };
+}
+
+const SEV_WORDS: Record<string, Severity> = { major: "Major", severe: "Major", high: "Major", contraindicated: "Major", moderate: "Moderate",
+  medium: "Moderate", monitor: "Moderate", minor: "Minor", low: "Minor", unknown: "Unknown" };
+
+function importInteractions(text: string, source: string) {
+  const rows = csvRows(text);
+  if (!rows.length) fail(400, "invalid_input", "CSV file is empty");
+  const head = rows[0].map((h) => h.toLowerCase());
+  const ia = head.findIndex((h) => h === "drug_a" || h === "drug1"), ib = head.findIndex((h) => h === "drug_b" || h === "drug2");
+  const is = head.indexOf("severity"), inotes = head.indexOf("notes");
+  if (ia < 0 || ib < 0) fail(400, "invalid_input", "CSV must contain columns for both drugs (e.g., 'drug_a,drug_b,severity')");
+  let added = 0, updated = 0, created = 0;
+  const sample: { drug_a: string; drug_b: string; severity: string; status: string; notes?: string }[] = [];
+  for (const r of rows.slice(1)) {
+    if (!r[ia] || !r[ib]) continue;
+    const a = drugFor(r[ia]), b = drugFor(r[ib]);
+    created += Number(a.created) + Number(b.created);
+    const sev = SEV_WORDS[(r[is] ?? "").toLowerCase()] ?? "Unknown";
+    const k = pairKey(a.d.id, b.d.id);
+    const status = PAIRS[k] ? "updated" : "added";
+    if (PAIRS[k]) updated++; else { added++; addedPairs++; }
+    PAIRS[k] = sev;
+    PAIR_SOURCE[k] = source;
+    if (sample.length < 8) sample.push({ drug_a: a.d.name, drug_b: b.d.name, severity: sev, status, notes: inotes >= 0 ? r[inotes] : undefined });
+  }
+  return { status: "success", kb_version: KB, total_rows_parsed: rows.length - 1, added_interactions: added, updated_interactions: updated,
+    new_drugs_created: created, total_interactions_now: 160235 + addedPairs, sample };
+}
+
+function importGuideline(text: string, title: string, docType: string, source: string, version: string) {
+  if (!text.trim()) fail(400, "invalid_input", "No guideline file or text provided");
+  const rows = csvRows(text);
+  const isCsv = rows[0]?.map((h) => h.toLowerCase()).join(",").startsWith("section,text");
+  const parts = isCsv
+    ? rows.slice(1).map((r) => ({ section: r[0], body: r[1] ?? "", drugs: (r[2] ?? "").split(/[;,]/).map((x) => x.trim()).filter(Boolean) }))
+    : text.split(/\n\s*\n/).map((body, i) => ({ section: `Part ${i + 1}`, body: body.trim(), drugs: [] as string[] }));
+  let mentions = 0;
+  const sample: { section: string; text_preview: string; drugs_tagged: string[] }[] = [];
+  for (const part of parts) {
+    if (!part.body) continue;
+    const named = new Set(part.drugs.map((d) => drugFor(d).d));
+    DRUGS.forEach((d) => { if (d.aliases.some((a) => norm(part.body).includes(a))) named.add(d); });
+    const tagged = [...named];
+    mentions += tagged.length;
+    for (let i = 0; i < tagged.length; i++)
+      for (let j = i + 1; j < tagged.length; j++) {
+        const k = pairKey(tagged[i].id, tagged[j].id);
+        const card = { document: title, doc_type: docType, source, version, license: `${source} (uploaded by pharmacist)`, url: "",
+          section: part.section, page: null, file_name: `${title.toLowerCase().replace(/\s+/g, "_")}.csv`, text: part.body, score: null,
+          retrieval_mode: "hybrid", matched_via: Object.fromEntries([tagged[i], tagged[j]].map((d) => [d.name, "direct"])),
+          label: "SOURCE TEXT (retrieved, not AI-generated)" };
+        EVIDENCE[k] = { cards: [...(EVIDENCE[k]?.cards ?? []), card], claim: EVIDENCE[k]?.claim, span: EVIDENCE[k]?.span };
+      }
+    if (sample.length < 6) sample.push({ section: part.section, text_preview: part.body.slice(0, 120) + "...", drugs_tagged: tagged.map((d) => d.name).slice(0, 6) });
+  }
+  addedDocs++;
+  return { status: "success", document_id: 900 + addedDocs, document_title: title, doc_type: docType, chunks_created: parts.length,
+    drug_mentions_tagged: mentions, sample_chunks: sample };
+}
+
 // ------------------------------------------------------------------ router
 export async function mockApi(path: string, opts: { method?: string; body?: unknown; form?: FormData }): Promise<unknown> {
   const url = new URL(path, "http://demo");
@@ -568,7 +667,8 @@ export async function mockApi(path: string, opts: { method?: string; body?: unkn
     return {
       finding: f, prescription_id: s.rx.id,
       database_record: { interaction_id: f.interaction_id, drug_a: f.drug_a, drug_a_ddinter_id: `DEMO${f.drug_a_id}`, drug_b: f.drug_b,
-        drug_b_ddinter_id: `DEMO${f.drug_b_id}`, severity: f.severity, source: "DDInter", source_record_id: f.source_record_id, kb_version: KB, table: "drug_interactions" },
+        drug_b_ddinter_id: `DEMO${f.drug_b_id}`, severity: f.severity, source: f.source, source_record_id: f.source_record_id, kb_version: KB, table: "drug_interactions",
+        source_file: f.source === "DDInter" ? "ddinter_downloads_code_B.csv (DDInter 1.0 Dataset, demo subset)" : `${f.source}.csv` },
       sources: [{ name: "DDInter 1.0 (demo subset)", version: "1.0", license: "Academic / non-commercial (verify before other use)", url: "http://ddinter.scbdd.com/", retrieved_at: "2026-09-30", checksum: "demo" }],
       explanation: s.rx.explanation ? { id: s.rx.explanation.id, mode: s.rx.explanation.mode, model: s.rx.explanation.model, prompt_version: s.rx.explanation.prompt_version, correlation_id: s.rx.explanation.correlation_id, fallback_level: 0 } : null,
       claims_kept: claims, claims_dropped: [], check_correlation_id: s.rx.correlation_id,
@@ -619,8 +719,17 @@ export async function mockApi(path: string, opts: { method?: string; body?: unkn
       return hit ? { text: hit, status: "ok" } : { text: null, status: "unavailable", reason: "The offline demo has translations for its sample passages only." };
     }) };
   }
+  if (p === "/kb/templates") return { interactions_template: INT_TEMPLATE, guidelines_template: GUIDE_TEMPLATE };
+  if (p === "/kb/interactions/upload") return importInteractions(opts.form ? await fileText(opts.form) : String(body.csv_text ?? ""),
+    String((opts.form ? opts.form.get("source") : body.source) ?? "").trim() || "Pharmacist_Upload");
+  if (p === "/kb/guidelines/upload") {
+    const get = (k: string) => String((opts.form ? opts.form.get(k) : body[k]) ?? "").trim();
+    return importGuideline(opts.form ? await fileText(opts.form) : String(body.csv_text ?? ""), get("title") || "Hospital Clinical Guideline",
+      get("doc_type") || "GUIDELINE", get("source") || "Pharmacist_Upload", get("version") || "2026.10");
+  }
   if (p === "/kb") return {
-    kb_version: KB, loaded_at: "2026-10-01T09:12:00Z", counts: { drugs: 1939, aliases: 4120, interactions: 160235, documents: 14 },
+    kb_version: KB, loaded_at: "2026-10-01T09:12:00Z",
+    counts: { drugs: 1939 + addedDrugs, aliases: 4120 + addedDrugs, interactions: 160235 + addedPairs, documents: 14 + addedDocs },
     sources: [
       { name: "DDInter 1.0", version: "1.0", license: "No licence text on the download page; treated as academic / non-commercial", url: "http://ddinter.scbdd.com/", retrieved_at: "2026-09-30", is_synthetic: false, notes: "Interaction existence and severity" },
       { name: "NLEM 2022", version: "2022", license: "Government of India publication", url: "https://main.mohfw.gov.in/", retrieved_at: "2026-09-30", is_synthetic: false, notes: "Essential-medicine fields and RAG chunks" },

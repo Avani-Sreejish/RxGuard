@@ -202,6 +202,8 @@ export interface FindingDetail {
     severity: string;
     source: string;
     source_record_id: string;
+    /** Dataset file holding this record, e.g. "ddinter_downloads_code_B.csv (DDInter 1.0 Dataset)". */
+    source_file?: string;
     kb_version: string;
     table: string;
   };

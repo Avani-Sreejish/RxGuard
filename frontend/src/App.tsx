@@ -11,7 +11,7 @@ import NewCheck from "./pages/NewCheck";
 import Review from "./pages/Review";
 import Queue from "./pages/Queue";
 import Patients from "./pages/Patients";
-import Evaluation from "./pages/Evaluation";
+import ReferenceData from "./pages/ReferenceData";
 
 const LANG_KEY = "rxguard.lang";
 function initialLang(): Lang {
@@ -89,14 +89,14 @@ export default function App() {
     { to: "/check", key: "nav.check", icon: "plus", match: ["check"] },
     { to: "/queue", key: "nav.queue", icon: "list", match: ["queue", "rx"] },
     { to: "/patients", key: "nav.patients", icon: "users", match: ["patients"] },
-    { to: "/evaluation", key: "nav.eval", icon: "chart", match: ["evaluation"] },
+    { to: "/data", key: "nav.data", icon: "database", match: ["data"] },
   ];
 
   let body: React.ReactNode;
   if (page === "rx" && arg) body = <Review key={arg} id={Number(arg)} />;
   else if (page === "queue") body = <Queue />;
   else if (page === "patients") body = <Patients id={arg && !arg.startsWith("?") ? arg : undefined} />;
-  else if (page === "evaluation") body = <Evaluation />;
+  else if (page === "data") body = <ReferenceData />;
   else body = <NewCheck key={patientParam ?? "new"} patientId={patientParam} />;
 
   return (

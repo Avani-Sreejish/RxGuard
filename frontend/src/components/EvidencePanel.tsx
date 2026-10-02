@@ -22,6 +22,7 @@ function highlight(text: string, span?: string) {
 }
 
 const DOC_TYPE: Record<string, string> = { NLEM: "NLEM 2022", ICMR_STW: "ICMR STW", STW: "ICMR STW", WHO_MF: "WHO formulary" };
+const docType = (d: string) => DOC_TYPE[d] ?? d.replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase());
 
 export default function EvidencePanel({
   finding,
@@ -70,7 +71,7 @@ export default function EvidencePanel({
           <Icon name="list" size={16} /> {t("rev.dbRecord")}
         </h4>
         <p className="claim db-claim">{dbClaim(t, lang, finding)}</p>
-        <p className="meta">{t("rev.recordId", { id: finding.source_record_id, kb: finding.kb_version })}</p>
+        <p className="meta">{t("rev.recordId", { id: finding.source_record_id, kb: finding.kb_version, src: finding.source || "DDInter" })}</p>
       </section>
 
       {explaining && (
@@ -125,7 +126,7 @@ export default function EvidencePanel({
                     <div>
                       <div className="doc-title">{p.document}</div>
                       <div className="doc-meta">
-                        <Tag tone="brand">{DOC_TYPE[p.doc_type] ?? p.doc_type}</Tag>
+                        <Tag tone="brand">{docType(p.doc_type)}</Tag>
                         <span>{p.section}</span>
                         {p.page !== null && <span>{t("rev.page", { p: p.page })}</span>}
                         <span>{p.version}</span>
@@ -134,6 +135,7 @@ export default function EvidencePanel({
                   </div>
                   <blockquote>{highlight(p.text, p.support_span)}</blockquote>
                   <TranslationOf text={p.text} get={tr} />
+                  {p.file_name && p.file_name !== p.document && <p className="meta file-line"><Icon name="file" size={14} /> {t("rev.file", { f: p.file_name })}</p>}
                   <div className="passage-foot">
                     {p.sample && <Tag tone="warn">{t("rev.sample")}</Tag>}
                     {p.matched_via && Object.keys(p.matched_via).length > 0 && (
@@ -178,6 +180,12 @@ function Provenance({ findingId }: { findingId: number }) {
           <dd>
             {d.database_record.table} · id {d.database_record.interaction_id} · {d.database_record.source_record_id} · KB {d.database_record.kb_version}
           </dd>
+          {d.database_record.source_file && (
+            <>
+              <dt>{t("rev.sourceFile")}</dt>
+              <dd>{d.database_record.source_file}</dd>
+            </>
+          )}
           {d.sources.map((s) => (
             <div key={s.name} className="dl-row">
               <dt>Source</dt>
