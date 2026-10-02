@@ -33,8 +33,8 @@
   --mark: #fff1b8;
   --shadow: 0 1px 2px rgb(19 42 36 / 0.05), 0 6px 18px rgb(19 42 36 / 0.06);
   --shadow-pop: 0 10px 34px rgb(19 42 36 / 0.16);
-  --wash-a: rgb(242 246 244 / 0.45);
-  --wash-b: rgb(242 246 244 / 0.8);
+  --wash-a: rgb(242 246 244 / 0.15);
+  --wash-b: rgb(242 246 244 / 0);
   --glass: rgb(255 255 255 / 0.9);
   --font: "IBM Plex Sans", "IBM Plex Sans Devanagari", "Noto Sans Malayalam", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --r-s: 6px;
@@ -239,11 +239,14 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .login { position: relative; min-height: 100vh; min-height: 100dvh; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
 .login-photo {
   position: absolute; inset: 0; z-index: 0;
-  background-image: linear-gradient(180deg, var(--wash-a), var(--wash-b)), url("./assets/login-bg.jpg");
-  background-size: cover; background-position: center 30%;
+  background-color: #eef6f6;
+  background-image: linear-gradient(90deg, var(--wash-a), var(--wash-b)), url("./assets/login-bg.jpg");
+  background-size: cover; background-position: 72% center;
 }
 .login-top { position: relative; z-index: 1; display: flex; justify-content: flex-end; padding: 16px 20px; }
 .login-main { position: relative; z-index: 1; display: grid; place-items: center; padding: 16px 16px 48px; }
+/* wide screens: the form sits on the photo's calm left side, leaving the pills visible on the right */
+@media (min-width: 1000px) { .login-main { justify-items: start; padding-left: max(6vw, 48px); } }
 .login-panel {
   width: min(440px, 100%); background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow-pop); padding: 32px 32px 24px;
