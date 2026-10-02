@@ -209,18 +209,15 @@ export default function Detail({ id }: { id: number }) {
                   >
                     <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                       <span className="badge esc" style={{ fontSize: 10 }}>
-                        {lang === "hi" ? "🇮🇳 हिंदी अनुवाद" : "🌴 മലയാളം പരിഭാഷ"} (Regional Translation)
+                        {lang === "hi" ? "🇮🇳 हिंदी अनुवाद" : "🌴 മലയാളം പരിഭാഷ"} (database record only)
                       </span>
-                      <span style={{ fontWeight: 700, fontSize: 12 }}>
-                        {translations[lang][f.id].severity_translated || translations[lang][f.id].severity_hi}
-                      </span>
+                      <span style={{ fontWeight: 700, fontSize: 12 }}>{translations[lang][f.id].severity_translated}</span>
                     </div>
                     <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)" }}>
-                      {translations[lang][f.id].db_claim_translated || translations[lang][f.id].db_claim_hi}
+                      {translations[lang][f.id].db_claim_translated}
                     </div>
                     <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-                      💡 <b>{lang === "hi" ? "नैदानिक सलाह" : "ക്ലിനിക്കൽ നിർദ്ദേശം"}:</b>{" "}
-                      {translations[lang][f.id].clinical_advice_translated || translations[lang][f.id].clinical_advice_hi}
+                      Fixed translation of the database record. The English text is the reference.
                     </div>
                   </div>
                 )}

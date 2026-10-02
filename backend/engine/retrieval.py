@@ -132,13 +132,22 @@ def save_index(kb_label: str, vectors: np.ndarray, chunk_ids: list[int]):
         _bm25.pop(kb_label, None)
 
 
+def _index_stamp(d: Path) -> float | None:
+    try:
+        return (d / "meta.json").stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 def load_index(kb_label: str):
     if context.simulating("faiss_down"):
         raise IndexUnavailable("simulated: vector index unavailable")
-    with _lock:
-        if kb_label in _indexes:
-            return _indexes[kb_label]
     d = index_dir(kb_label)
+    stamp = _index_stamp(d)
+    with _lock:
+        cached = _indexes.get(kb_label)
+        if cached and cached[2] == stamp:
+            return cached[0], cached[1]
     if not (d / "index.faiss").exists():
         raise IndexUnavailable(f"no FAISS index for {kb_label} at {d}")
     try:
@@ -148,8 +157,41 @@ def load_index(kb_label: str):
     except Exception as e:  # noqa: BLE001
         raise IndexUnavailable(str(e)) from e
     with _lock:
-        _indexes[kb_label] = (idx, meta)
+        if cached:  # another process appended rows (guideline upload): BM25 must see them too
+            _bm25.pop(kb_label, None)
+        _indexes[kb_label] = (idx, meta, stamp)
     return idx, meta
+
+
+_append_lock = threading.Lock()
+
+
+def append_to_index(kb_label: str, vectors: np.ndarray, chunk_ids: list[int]) -> list[int]:
+    """Add passage vectors for uploaded chunks; returns their FAISS rows. Files are replaced atomically
+    (index first, then meta.json, whose mtime tells every worker to reload). One writer per process;
+    uploads are admin-only and rare."""
+    import os
+
+    import faiss
+
+    d = index_dir(kb_label)
+    if not (d / "index.faiss").exists():
+        raise IndexUnavailable(f"no FAISS index for {kb_label} at {d}")
+    with _append_lock:
+        idx = faiss.read_index(str(d / "index.faiss"))  # fresh copy: never mutate the one being searched
+        meta = json.loads((d / "meta.json").read_text())
+        start = idx.ntotal
+        idx.add(np.asarray(vectors, dtype="float32"))
+        faiss.write_index(idx, str(d / "index.faiss.tmp"))
+        os.replace(d / "index.faiss.tmp", d / "index.faiss")
+        meta["chunk_ids"] = list(meta.get("chunk_ids", [])) + list(chunk_ids)
+        meta["rows"] = idx.ntotal
+        (d / "meta.json.tmp").write_text(json.dumps(meta))
+        os.replace(d / "meta.json.tmp", d / "meta.json")
+        with _lock:
+            _indexes.pop(kb_label, None)
+            _bm25.pop(kb_label, None)
+    return list(range(start, start + len(chunk_ids)))
 
 
 def index_ready(kb_label: str) -> tuple[bool, str]:

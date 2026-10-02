@@ -477,7 +477,7 @@ def _template_claims(state: AgentState) -> list[dict]:
     for f in state.findings:
         out.append({"claim_id": f"t{f['ordinal']}", "finding_ordinal": f["ordinal"], "source_type": "DATABASE",
                     "source_id": f["interaction_id"],
-                    "text": f"DDInter records {f['drug_a']} and {f['drug_b']} as a {f['severity']} interaction."})
+                    "text": tool1.db_claim_text(f["drug_a"], f["drug_b"], f["severity"], f.get("source"))})
     return out
 
 
@@ -503,7 +503,7 @@ def _explain_payload(state: AgentState, budget: llm_gateway.Budget) -> tuple[str
                                    "drug_b": f["drug_b"], "severity": f["severity"],
                                    "chunk_ids": {c["chunk_id"] for c in chunks}}
         blocks.append({"finding_ordinal": f["ordinal"], "interaction_id": f["interaction_id"], "drug_a": f["drug_a"],
-                       "drug_b": f["drug_b"], "severity": f["severity"], "source": f"DDInter {state.kb_label}",
+                       "drug_b": f["drug_b"], "severity": f["severity"], "source": tool1.source_label(f.get("source")),
                        "reference_passages": [
                            {"chunk_id": c["chunk_id"], "document": c["document"], "section": c["section"],
                             "quoted_reference_text": c["text"]} for c in chunks]})

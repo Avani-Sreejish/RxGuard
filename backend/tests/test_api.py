@@ -196,76 +196,128 @@ def test_explain_caps_llm_findings_but_keeps_every_db_fact(client, settings):
     assert db_claims == {f["ordinal"] for f in b["findings"]} and len(db_claims) > 2
 
 
-def test_translate_explanation(client):
-    """Verify that Hindi and Malayalam regional translation endpoints return localized findings and clinical claims."""
+
+def test_translate_explanation_renders_only_the_database_fact(client):
+    """Hindi / Malayalam wording of the stored fact only: no added advice, no guideline citation, names kept."""
     b = check(client, MAIN).json()
-    client.post("/api/v1/explain", {"prescription_id": b["id"]}, format="json")
-    
-    # Test Hindi
-    res_hi = client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": "hi"}, format="json")
-    assert res_hi.status_code == 200
-    data_hi = res_hi.json()
-    assert data_hi["language"] == "hi"
-    assert "translated_findings" in data_hi
-    assert len(data_hi["translated_findings"]) > 0
-    first_hi = data_hi["translated_findings"][0]
-    assert "severity_hi" in first_hi
-    assert "db_claim_hi" in first_hi
-    assert "clinical_advice_hi" in first_hi
-
-    # Test Malayalam
-    res_ml = client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": "ml"}, format="json")
-    assert res_ml.status_code == 200
-    data_ml = res_ml.json()
-    assert data_ml["language"] == "ml"
-    assert data_ml["language_name"] == "മലയാളം (Malayalam)"
-    first_ml = data_ml["translated_findings"][0]
-    assert "ഗുരുതരം" in first_ml["severity_ml"] or "മിതമായത്" in first_ml["severity_ml"] or "ലഘുവായത്" in first_ml["severity_ml"]
-    assert "ഡിഡിഇന്റർ" in first_ml["db_claim_ml"]
-    assert "ഐസിഎംആർ" in first_ml["clinical_advice_ml"]
+    for lang in ("hi", "ml"):
+        r = client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": lang}, format="json")
+        assert r.status_code == 200, r.content
+        rows = r.json()["translated_findings"]
+        assert len(rows) == len(b["findings"])
+        for row in rows:
+            assert set(row) == {"finding_id", "ordinal", "drug_a", "drug_b", "severity_en", "severity_translated",
+                                "db_claim_translated", "db_claim_en"}
+            assert row["drug_a"] in row["db_claim_translated"] and row["drug_b"] in row["db_claim_translated"]
+            assert f"({row['severity_en']})" in row["db_claim_translated"]
+            assert "DDInter" in row["db_claim_translated"] and "ICMR" not in row["db_claim_translated"]
+    assert client.post(f"/api/v1/prescriptions/{b['id']}/translate", {"language": "ta"},
+                       format="json").status_code == 400
 
 
-def test_upload_interactions_and_immediate_check(client):
-    """Pharmacist uploads a custom CSV pair (Amiodarone + Ciprofloxacin) and /check immediately detects it."""
-    csv_content = (
-        "drug_a,drug_b,severity,notes\n"
-        "Amiodarone,Ciprofloxacin,Major,Torsades de pointes ventricular arrhythmia risk\n"
-    )
-    res = client.post("/api/v1/kb/interactions/upload", {"csv_text": csv_content}, format="json")
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "success"
-    assert data["added_interactions"] >= 1
+@pytest.fixture
+def admin_client(kb):
+    from django.contrib.auth.models import Group, User
+    from rest_framework.authtoken.models import Token
+    from rest_framework.test import APIClient
 
-    # Now verify that checking a prescription with Amiodarone and Ciprofloxacin immediately detects this Major finding!
-    rx_text = "Rx\n1. Tab Amiodarone 200 mg OD\n2. Tab Ciprofloxacin 500 mg BD"
-    check_res = check(client, rx_text)
-    assert check_res.status_code == 201
-    check_body = check_res.json()
-    assert check_body["priority"] == "P1"
-    findings = check_body["findings"]
-    assert len(findings) == 1
-    f = findings[0]
-    assert f["severity"] == "Major"
-    assert {f["drug_a"], f["drug_b"]} == {"Amiodarone", "Ciprofloxacin"}
+    u = User.objects.create_user("admin1", password="pw", is_staff=True)  # as seeded: staff + pharmacist role
+    u.groups.add(Group.objects.get(name="pharmacist"))
+    cl = APIClient()
+    cl.credentials(HTTP_AUTHORIZATION="Token " + Token.objects.create(user=u).key)
+    return cl
 
 
-def test_upload_guidelines(client):
-    """Pharmacist uploads custom guideline CSV and chunks/mentions are indexed."""
-    csv_content = (
-        "section,text,drugs\n"
-        "Cardiology - Arrhythmia,Amiodarone and Ciprofloxacin should not be co-prescribed due to fatal QT prolongation risk.,Amiodarone, Ciprofloxacin\n"
-    )
-    res = client.post("/api/v1/kb/guidelines/upload", {
-        "csv_text": csv_content,
-        "title": "Hospital Cardiology Protocol 2026",
-    }, format="json")
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "success"
-    assert data["chunks_created"] == 1
-    assert data["drug_mentions_tagged"] >= 1
+def test_kb_uploads_are_admin_only(client):
+    up = client.post("/api/v1/kb/interactions/upload", {"csv_text": "drug_a,drug_b,severity\nA,B,Major"},
+                     format="json")
+    assert up.status_code == 403
+    assert client.post("/api/v1/kb/guidelines/upload", {"csv_text": "x", "title": "t"},
+                       format="json").status_code == 403
 
 
+def test_interaction_upload_adds_but_never_overrides(admin_client, client):
+    csv_text = ("drug_a,drug_b,severity,notes\n"
+                "Amlodipine,Atorvastatin,Major,local formulary pair\n"  # new pair -> added
+                "Warfarin,aspirin,Minor,attempted downgrade\n"          # DDInter Major -> kept unchanged
+                "Warfrin,Omeprazole,Major,\n"                            # typo -> rejected, no new drug
+                "Amlodipine,Omeprazole,dangerous,\n"                     # bad severity -> rejected
+                "Synflam,Amlodipine,Major,\n")                           # combination product -> rejected
+    r = admin_client.post("/api/v1/kb/interactions/upload", {"csv_text": csv_text}, format="json")
+    assert r.status_code == 200, r.content
+    body = r.json()
+    assert (body["added_interactions"], body["kept_existing"], body["rejected_rows"]) == (1, 1, 3)
+    assert body["kept"][0]["severity"] == "Major" and body["kept"][0]["source"] == "DDInter"
+    assert {x["row"] for x in body["rejected"]} == {4, 5, 6}
+
+    from api.models import Drug
+    assert not Drug.objects.filter(normalized_name="warfrin").exists()
+
+    b = check(client, "Rx\n1. Tab Amlodipine 5 mg OD\n2. Tab Atorvastatin 10 mg HS\n3. Tab Warfarin 5 mg OD\n"
+                      "4. Tab Aspirin 75 mg OD").json()
+    sev = {frozenset((f["drug_a"], f["drug_b"])): f["severity"] for f in b["findings"]}
+    assert sev[frozenset(("Amlodipine", "Atorvastatin"))] == "Major"
+    assert sev[frozenset(("Warfarin", "Acetylsalicylic acid"))] == "Major"
+
+    e = client.post("/api/v1/explain", {"prescription_id": b["id"]}, format="json").json()
+    texts = {c["text"] for c in e["explanation"]["claims"] if c["source_type"] == "DATABASE"}
+    assert "Hospital upload records Amlodipine and Atorvastatin as a Major interaction." in texts
+    assert "DDInter records Amlodipine and Atorvastatin as a Major interaction." not in texts
+
+    up = next(f for f in b["findings"] if {f["drug_a"], f["drug_b"]} == {"Amlodipine", "Atorvastatin"})
+    proof = client.get(f"/api/v1/findings/{up['id']}").json()
+    assert proof["database_record"]["source_file"] == "direct_entry.csv"
+    assert proof["sources"][0]["checksum"] == body["checksum"]
 
 
+def test_interaction_upload_requires_severity_column(admin_client):
+    r = admin_client.post("/api/v1/kb/interactions/upload", {"csv_text": "drug_a,drug_b\nAmlodipine,Omeprazole"},
+                          format="json")
+    assert r.status_code == 400 and r.json()["error"]["code"] == "bad_columns"
+
+
+def test_guideline_upload_needs_the_index(admin_client):
+    """No FAISS index for the fixture KB: nothing is written, because chunks without vectors are never retrieved."""
+    from api.models import CorpusDocument
+
+    before = CorpusDocument.objects.count()
+    r = admin_client.post("/api/v1/kb/guidelines/upload", {"csv_text": "Warfarin text.", "title": "Protocol"},
+                          format="json")
+    assert r.status_code == 503 and r.json()["error"]["code"] == "index_unavailable"
+    assert CorpusDocument.objects.count() == before
+
+
+def test_guideline_upload_is_indexed_and_tagged(admin_client, monkeypatch):
+    import numpy as np
+
+    from api.models import ChunkDrugMention, CorpusChunk
+    from engine import retrieval
+
+    monkeypatch.setattr(retrieval, "load_index", lambda label: (None, {}))
+    monkeypatch.setattr(retrieval, "embed", lambda texts, kind: np.zeros((len(texts), 4), dtype="float32"))
+    monkeypatch.setattr(retrieval, "append_to_index", lambda label, vecs, ids: list(range(100, 100 + len(ids))))
+    csv_text = ('section,text\n'
+                '"Bleeding","Review aspirin with warfarin, per the approved protocol."\n'
+                '"Lipids","Atorvastatin monitoring section."\n')
+    r = admin_client.post("/api/v1/kb/guidelines/upload", {"csv_text": csv_text, "title": "Ward Protocol"},
+                          format="json")
+    assert r.status_code == 200, r.content
+    assert r.json()["chunks_created"] == 2
+    chunks = list(CorpusChunk.objects.filter(document_id=r.json()["document_id"]).order_by("id"))
+    assert [c.faiss_row for c in chunks] == [100, 101]
+    tagged = set(ChunkDrugMention.objects.filter(chunk=chunks[0]).values_list("drug__generic_name", flat=True))
+    assert {"Warfarin", "Acetylsalicylic acid"} <= tagged
+
+
+def test_append_to_index_extends_rows_and_reloads(tmp_path, settings):
+    import numpy as np
+
+    from engine import retrieval
+
+    settings.RXGUARD = {**settings.RXGUARD, "INDEX_DIR": tmp_path}
+    v = np.eye(4, dtype="float32")
+    retrieval.save_index("vx", v[:2], [11, 12])
+    assert retrieval.load_index("vx")[0].ntotal == 2
+    assert retrieval.append_to_index("vx", v[2:], [13, 14]) == [2, 3]
+    idx, meta = retrieval.load_index("vx")
+    assert idx.ntotal == 4 and meta["chunk_ids"] == [11, 12, 13, 14] and meta["rows"] == 4

@@ -46,7 +46,7 @@ export default function App() {
   const tabs: [string, string, string][] = [
     ["queue", "📋", "Review queue"],
     ["new", "➕", "New check"],
-    ["dataset", "📥", "Dataset Ingestion"],
+    ...(me.is_admin ? [["dataset", "📥", "Dataset Ingestion"] as [string, string, string]] : []),
     ["attack", "⚔️", "Judge Attack"],
     ["obs", "📈", "Observability"],
     ["sources", "📚", "Sources & licences"],

@@ -86,6 +86,8 @@ python scripts/calibrate_retrieval.py      # retrieval-threshold calibration tab
 | `POST /api/v1/check` | deterministic check (JSON `text`, or multipart `file`: .txt / text-based PDF) |
 | `POST /api/v1/explain` | RAG + one LLM call + verifier; resumes the saved `/check` state |
 | `POST /api/v1/ask` | follow-up Q&A in a session (≤3 tool calls) |
+| `POST /api/v1/prescriptions/{id}/translate` | Hindi / Malayalam wording of each finding's database record only (fixed templates, no LLM, no advice) |
+| `POST /api/v1/kb/interactions/upload`, `/kb/guidelines/upload` | **admin only**: add local interaction pairs / hospital guideline text to the current KB (rules below) |
 | `GET /api/v1/prescriptions`, `/prescriptions/{id}` | queue / full view |
 | `POST /api/v1/prescriptions/{id}/items/{item}/confirm` | pharmacist confirms an unresolved line (re-checks Tool 1) |
 | `POST /api/v1/prescriptions/{id}/complete` | final review state — 409 until every P1 finding has an action |
@@ -195,6 +197,12 @@ All prescriptions in this repo are synthetic.
   Recall@5 has not been re-measured on the real corpus yet.
 - The Malayalam/Hindi explanation layer (stretch) is not built.
 - No clinical validation with practising pharmacists.
+- **Knowledge-base uploads (admin only)** add rows to the *current* KB version instead of creating a new one, so
+  "reviewed against KB vN" covers uploads made after the review. Each upload is recorded in `data_sources`
+  (uploader, file name, SHA-256). Uploads never change or downgrade an existing record, reject unknown drug names
+  and severities, and uploaded pairs are always worded "Hospital upload records ...", never as DDInter. Uploaded
+  guideline sections are appended to the FAISS index; concurrent uploads from two server processes are not
+  serialised.
 - Performance numbers apply only to the measured machine (laptop, Docker Desktop) and load profile; run C used an
   *assumed* 2 s LLM latency and a small drug pool that favours the embedding cache.
 - On CPU, the text encoder is the `/explain` capacity limit (one encode at a time per process).

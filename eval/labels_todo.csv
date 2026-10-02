@@ -1,7 +1,7 @@
 case,claim,source_type,source_id,auto_gold_match,labeler_1_supported,labeler_2_supported
-E11,Clarithromycin is included in the National List of Essential Medicines 2022 for secondary and tertiary levels of care.,RAG_CHUNK,2152,True,,
+E11,"Clarithromycin is included in the National List of Essential Medicines 2022 under other antibacterials and antituberculosis medicines for secondary and tertiary levels of care, available in tablet and oral liquid forms.",RAG_CHUNK,2152,True,,
 E12,The dosage form of amlodipine listed in NLEM 2022 is tablet.,RAG_CHUNK,2321,True,,
-E13,The ICMR STW for hypertension in adults lists lifestyle modification and pharmacological management.,RAG_CHUNK,2505,True,,
+E13,The ICMR STW for hypertension in adults does not list specific drugs.,RAG_CHUNK,2505,True,,
 E14,DDInter records Acetylsalicylic acid and Warfarin as a Major interaction.,DATABASE,649406,True,,
-E14,"Avoid concomitant aspirin, anti platelets, NSAIDs or alcohol.",RAG_CHUNK,2514,True,,
-E15,The interaction between fluconazole and warfarin was flagged because of a major severity interaction.,DATABASE,702504,True,,
+E14,The reference notes to avoid concomitant aspirin and NSAIDs.,RAG_CHUNK,2514,True,,
+E15,The interaction between Fluconazole and Warfarin was flagged as Major severity.,DATABASE,702504,True,,

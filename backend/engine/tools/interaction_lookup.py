@@ -19,6 +19,19 @@ _cache_lock = threading.Lock()
 _CACHE_MAX = 2048
 
 
+# drug_interactions.source for rows an administrator added through /kb/interactions/upload (kbload/uploads.py).
+UPLOAD_SOURCE = "Hospital upload"
+
+
+def source_label(source: str | None) -> str:
+    """Who a database claim is attributed to. Only seeded DDInter rows may be called DDInter."""
+    return "DDInter" if (source or "DDInter") == "DDInter" else UPLOAD_SOURCE
+
+
+def db_claim_text(drug_a: str, drug_b: str, severity: str, source: str | None = "DDInter") -> str:
+    return f"{source_label(source)} records {drug_a} and {drug_b} as a {severity} interaction."
+
+
 def no_row_wording(kb_label: str) -> str:
     return f"No interaction recorded in DDInter ({kb_label})"
 

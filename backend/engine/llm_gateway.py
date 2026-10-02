@@ -209,7 +209,7 @@ def _mock_explanation(node, prompt, user, sleep_ms, budget):
     blocks = json.loads(user.split(":\n", 1)[1])
     claims = [{"claim_id": f"c{i}", "finding_ordinal": b["finding_ordinal"], "source_type": "DATABASE",
                "source_id": b["interaction_id"],
-               "text": f"DDInter records {b['drug_a']} and {b['drug_b']} as a {b['severity']} interaction."}
+               "text": f"{b.get('source', 'DDInter')} records {b['drug_a']} and {b['drug_b']} as a {b['severity']} interaction."}
               for i, b in enumerate(blocks, start=1)]
     budget.calls += 1
     _record(node, "mock", prompt.version_tag, 0, 0, sleep_ms, 0, "ok", "LLM_MOCK_SLEEP_MS")

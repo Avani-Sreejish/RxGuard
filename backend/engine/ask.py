@@ -162,7 +162,7 @@ def run_ask(user, session, question: str) -> dict:
                 else:
                     interactions[f.interaction_id] = {"interaction_id": f.interaction_id, "drug_a": f.drug_a_name,
                                                       "drug_b": f.drug_b_name, "severity": f.severity,
-                                                      "source_record_id": f.source_record_id, "ordinal": f.ordinal,
+                                                      "source": f.source, "source_record_id": f.source_record_id, "ordinal": f.ordinal,
                                                       "priority": f.priority, "rule_id": f.rule_id}
                     for link in f.evidence.select_related("chunk__document").filter(status="FOUND"):
                         c = link.chunk
@@ -233,7 +233,7 @@ def run_ask(user, session, question: str) -> dict:
         if interactions:
             kept = [{"claim_id": f"t{i}", "finding_ordinal": x.get("ordinal", 1), "source_type": "DATABASE",
                      "source_id": x["interaction_id"],
-                     "text": f"DDInter records {x['drug_a']} and {x['drug_b']} as a {x['severity']} interaction."}
+                     "text": tool1.db_claim_text(x["drug_a"], x["drug_b"], x["severity"], x.get("source"))}
                     for i, x in enumerate(interactions.values(), start=1)]
             mode = "template"
     if not kept and mode == "llm":

@@ -18,16 +18,12 @@ interface IngestInteractionResult {
   kb_version: string;
   total_rows_parsed: number;
   added_interactions: number;
-  updated_interactions: number;
-  new_drugs_created: number;
+  kept_existing: number;
+  rejected_rows: number;
   total_interactions_now: number;
-  sample: Array<{
-    drug_a: string;
-    drug_b: string;
-    severity: string;
-    status: string;
-    notes?: string;
-  }>;
+  added: Array<{ drug_a: string; drug_b: string; severity: string; source_record_id: string }>;
+  kept: Array<{ row: number; drug_a: string; drug_b: string; severity: string; source: string; uploaded_severity: string }>;
+  rejected: Array<{ row: number; drug_a: string; drug_b: string; reason: string }>;
 }
 
 interface IngestGuidelineResult {
@@ -44,35 +40,32 @@ interface IngestGuidelineResult {
   }>;
 }
 
+// Format templates only. They are deliberately not clinical content, so nothing fabricated can be uploaded
+// by accident: replace every row with your hospital's reviewed data.
+// Format templates only. They are deliberately not clinical content, so nothing fabricated can be uploaded
+// by accident: replace every row with your hospital's reviewed data.
 const SAMPLE_INTERACTIONS_CSV = `drug_a,drug_b,severity,notes
-Amiodarone,Ciprofloxacin,Major,High risk of QT prolongation and torsades de pointes ventricular arrhythmia
-Metformin,Iodinated Contrast,Major,Risk of fatal lactic acidosis and acute contrast-induced nephrotoxicity
-Warfarin,Tramadol,Moderate,Elevated INR and increased hypoprothrombinemic bleeding risk
-Levothyroxine,Calcium Carbonate,Moderate,Decreased levothyroxine GI absorption; administer 4 hours apart
-Atorvastatin,Clarithromycin,Major,Marked increase in statin plasma concentration; risk of rhabdomyolysis`;
+<generic name in the KB>,<generic name in the KB>,Major,<optional; not stored>`;
 
-const SAMPLE_GUIDELINES_CSV = `section,text,drugs
-Cardiology - Arrhythmia & QT Risk,Concomitant administration of Amiodarone and Ciprofloxacin markedly increases the risk of QT interval prolongation and torsades de pointes ventricular arrhythmia. Concurrent use is contraindicated or requires continuous telemetry monitoring with electrolyte correction.,Amiodarone, Ciprofloxacin
-Endocrinology - Metformin & Radiocontrast,Patients receiving Metformin must withhold medication at the time of or prior to iodinated radiocontrast imaging procedures and for 48 hours post-procedure due to acute renal failure and fatal lactic acidosis risk.,Metformin
-Hematology - Warfarin Potentiation,Tramadol inhibits CYP2D6 and may enhance the hypoprothrombinemic effect of Warfarin. Monitor INR closely within 3 to 5 days of initiation.,Warfarin, Tramadol`;
+const SAMPLE_GUIDELINES_CSV = `section,text
+"<section heading>","<exact wording of this section from your approved protocol>"`;
 
 export default function DatasetIngestion() {
   const [activeTab, setActiveTab] = useState<"interactions" | "guidelines">("interactions");
   const [stats, setStats] = useState<KbStats | null>(null);
 
   // Interactions State
-  const [intSource, setIntSource] = useState("Hospital_Formulary_2026");
-  const [intCsv, setIntCsv] = useState(SAMPLE_INTERACTIONS_CSV);
+  const [intCsv, setIntCsv] = useState("");
   const [intFile, setIntFile] = useState<File | null>(null);
   const [intLoading, setIntLoading] = useState(false);
   const [intResult, setIntResult] = useState<IngestInteractionResult | null>(null);
   const [intError, setIntError] = useState("");
 
   // Guidelines State
-  const [guideTitle, setGuideTitle] = useState("Hospital Clinical Practice Protocol 2026");
-  const [guideType, setGuideType] = useState("CLINICAL_GUIDELINE");
-  const [guideSource, setGuideSource] = useState("Hospital_Pharmacy_Committee");
-  const [guideCsv, setGuideCsv] = useState(SAMPLE_GUIDELINES_CSV);
+  const [guideTitle, setGuideTitle] = useState("");
+  const [guideType, setGuideType] = useState("GUIDELINE");
+  const [guideSource, setGuideSource] = useState("");
+  const [guideCsv, setGuideCsv] = useState("");
   const [guideFile, setGuideFile] = useState<File | null>(null);
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideResult, setGuideResult] = useState<IngestGuidelineResult | null>(null);
@@ -99,11 +92,10 @@ export default function DatasetIngestion() {
       if (intFile) {
         const form = new FormData();
         form.append("file", intFile);
-        form.append("source", intSource);
         res = await api<IngestInteractionResult>("/api/v1/kb/interactions/upload", { form });
       } else {
         res = await api<IngestInteractionResult>("/api/v1/kb/interactions/upload", {
-          body: { csv_text: intCsv, source: intSource },
+          body: { csv_text: intCsv },
         });
       }
       setIntResult(res);
@@ -168,7 +160,7 @@ export default function DatasetIngestion() {
         <div>
           <h1>Knowledge Base & Dataset Ingestion</h1>
           <p className="sub">
-            Add custom drug-drug interaction CSV datasets and clinical treatment guidelines into RxGuard's verified knowledge engine.
+            Administrators can add local interaction pairs and hospital guideline text. Uploads only add: existing DDInter records are never changed, and uploaded pairs are always shown as "Hospital upload", never as DDInter.
           </p>
         </div>
         {stats && (
@@ -228,29 +220,16 @@ export default function DatasetIngestion() {
                     setIntCsv(SAMPLE_INTERACTIONS_CSV);
                   }}
                 >
-                  🔄 Load Example
+                  🔄 Load format template
                 </button>
               </div>
             </div>
 
             <p className="small muted" style={{ marginTop: 0 }}>
-              Expected columns: <code>drug_a</code>, <code>drug_b</code>, <code>severity</code> (Major, Moderate, Minor, or Unknown), and optional <code>notes</code>.
+              Expected columns: <code>drug_a</code>, <code>drug_b</code>, <code>severity</code> (Major, Moderate, Minor, or Unknown). Drug names must already be in the knowledge base; <code>notes</code> is ignored.
             </p>
 
             <form onSubmit={handleUploadInteractions}>
-              <div className="row" style={{ marginBottom: 12 }}>
-                <label className="field" style={{ flex: 1, margin: 0 }}>
-                  <span style={{ fontWeight: 600 }}>Formulary / Source Name:</span>
-                  <input
-                    type="text"
-                    value={intSource}
-                    onChange={(e) => setIntSource(e.target.value)}
-                    placeholder="e.g. Apollo_Hospital_Formulary_2026"
-                    required
-                  />
-                </label>
-              </div>
-
               <div style={{ marginBottom: 12 }}>
                 <label className="field" style={{ margin: 0 }}>
                   <span style={{ fontWeight: 600 }}>CSV Content (Paste or Edit):</span>
@@ -259,7 +238,7 @@ export default function DatasetIngestion() {
                     value={intCsv}
                     onChange={(e) => setIntCsv(e.target.value)}
                     disabled={!!intFile}
-                    placeholder="drug_a,drug_b,severity,notes&#10;Amiodarone,Ciprofloxacin,Major,QT prolongation risk"
+                    placeholder="drug_a,drug_b,severity&#10;Generic name,Generic name,Major"
                     className="mono small"
                   />
                 </label>
@@ -314,32 +293,43 @@ export default function DatasetIngestion() {
                     <b style={{ fontSize: 18, color: "var(--p1)" }}>+{intResult.added_interactions}</b>
                   </div>
                   <div className="card" style={{ padding: "8px 12px", background: "var(--surface)" }}>
-                    <div className="small muted">Updated Pairs</div>
-                    <b style={{ fontSize: 18, color: "var(--p2)" }}>{intResult.updated_interactions}</b>
+                    <div className="small muted">Already recorded (unchanged)</div>
+                    <b style={{ fontSize: 18, color: "var(--p2)" }}>{intResult.kept_existing}</b>
                   </div>
                   <div className="card" style={{ padding: "8px 12px", background: "var(--surface)" }}>
-                    <div className="small muted">New Molecules Registered</div>
-                    <b style={{ fontSize: 18, color: "var(--accent)" }}>+{intResult.new_drugs_created}</b>
+                    <div className="small muted">Rejected rows</div>
+                    <b style={{ fontSize: 18, color: "var(--accent)" }}>{intResult.rejected_rows}</b>
                   </div>
                 </div>
 
-                <h3>Sample Ingested Pairs:</h3>
                 <table>
                   <thead>
                     <tr>
-                      <th>Pair</th>
-                      <th>Severity</th>
-                      <th>Status</th>
-                      <th>Notes</th>
+                      <th>Row / pair</th>
+                      <th>Severity in KB</th>
+                      <th>Result</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {intResult.sample.map((s, idx) => (
-                      <tr key={idx}>
+                    {intResult.added.map((s) => (
+                      <tr key={`a${s.source_record_id}`}>
                         <td><b>{s.drug_a} ↔ {s.drug_b}</b></td>
                         <td><Sev s={s.severity as any} /></td>
-                        <td><span className="badge synth">{s.status}</span></td>
-                        <td className="small muted">{s.notes || "—"}</td>
+                        <td><span className="badge synth">added · Hospital upload</span></td>
+                      </tr>
+                    ))}
+                    {intResult.kept.map((s) => (
+                      <tr key={`k${s.row}`}>
+                        <td><b>{s.drug_a} ↔ {s.drug_b}</b> <span className="small muted">row {s.row}</span></td>
+                        <td><Sev s={s.severity as any} /></td>
+                        <td className="small">kept: already recorded by {s.source} (upload said {s.uploaded_severity})</td>
+                      </tr>
+                    ))}
+                    {intResult.rejected.map((s) => (
+                      <tr key={`r${s.row}`}>
+                        <td>{s.drug_a} ↔ {s.drug_b} <span className="small muted">row {s.row}</span></td>
+                        <td>—</td>
+                        <td className="small" style={{ color: "var(--p1)" }}>rejected: {s.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -353,7 +343,7 @@ export default function DatasetIngestion() {
                     <b>Canonical Ordering:</b> Pairs are automatically ordered so <code>A ↔ B</code> and <code>B ↔ A</code> map to the same unique relation.
                   </li>
                   <li>
-                    <b>Entity Normalization:</b> Drug names are normalized using INN/USAN rules. Missing drugs are automatically registered into the active KB version.
+                    <b>Entity Normalization:</b> Drug names resolve through the same dictionary as prescriptions (generic, synonym, brand). Unknown names are rejected, never created.
                   </li>
                   <li>
                     <b>Instant Cache Invalidation:</b> Once ingested, the in-memory lookup cache is cleared. Every subsequent <code>/check</code> request immediately detects these interactions!
@@ -387,7 +377,7 @@ export default function DatasetIngestion() {
                     setGuideCsv(SAMPLE_GUIDELINES_CSV);
                   }}
                 >
-                  🔄 Load Example
+                  🔄 Load format template
                 </button>
               </div>
             </div>
@@ -411,10 +401,9 @@ export default function DatasetIngestion() {
                 <label className="field" style={{ flex: 1, margin: 0 }}>
                   <span style={{ fontWeight: 600 }}>Doc Type:</span>
                   <select value={guideType} onChange={(e) => setGuideType(e.target.value)}>
-                    <option value="CLINICAL_GUIDELINE">Clinical Guideline</option>
-                    <option value="ICMR_STW">ICMR STW</option>
-                    <option value="HOSPITAL_POLICY">Hospital Policy</option>
-                    <option value="FORMULARY_NOTE">Formulary Note</option>
+                    <option value="GUIDELINE">Clinical guideline</option>
+                    <option value="HOSPITAL_PROTOCOL">Hospital protocol</option>
+                    <option value="FORMULARY">Formulary note</option>
                   </select>
                 </label>
                 <label className="field" style={{ flex: 1.5, margin: 0 }}>
@@ -437,7 +426,7 @@ export default function DatasetIngestion() {
                     value={guideCsv}
                     onChange={(e) => setGuideCsv(e.target.value)}
                     disabled={!!guideFile}
-                    placeholder="section,text,drugs&#10;Cardiology - Arrhythmia,Amiodarone and Ciprofloxacin should not be combined...,Amiodarone, Ciprofloxacin"
+                    placeholder="section,text&#10;&quot;Section heading&quot;,&quot;Exact wording from your approved protocol&quot;"
                     className="mono small"
                   />
                 </label>
@@ -533,7 +522,7 @@ export default function DatasetIngestion() {
                     <b>Chunk Entity Linking:</b> Each guideline paragraph is automatically scanned for drug mentions and linked via <code>ChunkDrugMention</code> relations.
                   </li>
                   <li>
-                    <b>Instant RAG Search:</b> Pharmacists can immediately query these guidelines using the AI Copilot (<code>AskPanel</code>) or during prescription explanation verification.
+                    <b>Instant RAG Search:</b> Sections are embedded and added to the search index straight away. They count as evidence only if they pass the same relevance cutoff and verifier as the national guidelines.
                   </li>
                 </ul>
               </div>
