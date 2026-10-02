@@ -13,8 +13,9 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu --extra-i
 # Bake the embedding model into the image so the container never downloads at request time
 ARG EMBEDDING_MODEL=intfloat/multilingual-e5-base
 ARG RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
-# (retried: a dropped connection to the model CDN should not fail the whole image build)
-RUN for i in 1 2 3; do \
+# (plain HTTP download instead of the Xet protocol, which some networks drop mid-transfer; retried, so a dropped
+# connection does not fail the whole image build)
+RUN export HF_HUB_DISABLE_XET=1; for i in 1 2 3; do \
         python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')" \
         && python -c "from sentence_transformers import CrossEncoder; CrossEncoder('${RERANK_MODEL}')" \
         && ok=1 && break; \
