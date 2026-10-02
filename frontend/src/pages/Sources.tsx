@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { Synthetic } from "../components/Badges";
+import { Spinner, Synthetic } from "../components/Badges";
 
 export default function Sources() {
   const [kb, setKb] = useState<any>(null);
   useEffect(() => {
     api("/api/v1/kb").then(setKb);
   }, []);
-  if (!kb) return <span className="spin" />;
+  if (!kb) return <div className="page-loading"><Spinner /> Loading sources…</div>;
   return (
     <>
-      <h1>Sources and licences</h1>
-      <p className="sub">
+      <header className="page-head">
+        <div>
+          <h1>Sources and licences</h1>
+          <p className="muted">
         Current knowledge-base version <b>{kb.kb_version}</b> · {kb.counts?.drugs} drugs · {kb.counts?.interactions}{" "}
         interaction rows · {kb.counts?.aliases} aliases · {kb.counts?.documents} corpus documents
-      </p>
+          </p>
+        </div>
+      </header>
       <div className="card" style={{ overflowX: "auto" }}>
         <table>
           <thead>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import Icon from "./Icon";
 
 interface Entry {
   seq: number;
@@ -25,35 +26,37 @@ export default function AuditTrail({ id, refreshKey }: { id: number; refreshKey:
   }, [id, refreshKey]);
 
   return (
-    <div className="card">
+    <div className="card audit">
       <h2>
-        <span className="step">7</span>Audit trail
+        Audit trail
         {verify && (
-          <span className={`integrity ${verify.status}`} style={{ marginLeft: "auto" }}>
-            {verify.status === "VALID"
-              ? `Audit integrity ✓ (${verify.entries_checked} entries)`
-              : `TAMPERED at seq ${verify.first_broken_seq}`}
+          <span className={`integrity ${verify.status}`} style={{ marginLeft: "auto" }} role="status">
+            {verify.status === "VALID" ? (
+              <><Icon name="check" size={14} /> Chain intact · {verify.entries_checked} entries</>
+            ) : (
+              <><Icon name="alert" size={14} /> TAMPERED at seq {verify.first_broken_seq}</>
+            )}
           </span>
         )}
       </h2>
-      <p className="small muted" style={{ marginTop: 0 }}>
+      <p className="meta">
         Hash chain per prescription: each entry stores SHA-256(previous hash + canonical JSON). Not a blockchain.
       </p>
-      <table>
-        <tbody>
-          {entries.map((e) => (
-            <tr key={e.seq} className="audit-row clickable" onClick={() => setOpen(open === e.seq ? null : e.seq)}>
-              <td className="mono">{e.seq}</td>
-              <td>
-                <b>{e.event_type.replace(/_/g, " ")}</b> <span className="muted">· {e.actor} · KB {e.kb_version}</span>
-                <div className="hash">{e.hash.slice(0, 20)}… ← {e.prev_hash.slice(0, 12)}…</div>
-                {open === e.seq && <pre className="trace" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(e.payload, null, 1)}</pre>}
-              </td>
-              <td className="small muted">{new Date(e.timestamp).toLocaleTimeString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <ol className="audit-list">
+        {entries.map((e) => (
+          <li key={e.seq} className="cursor-pointer" onClick={() => setOpen(open === e.seq ? null : e.seq)}>
+            <span className="seq">{e.seq}</span>
+            <div>
+              <div className="audit-ev">{e.event_type.replace(/_/g, " ").toLowerCase()}</div>
+              <div className="meta">
+                {new Date(e.timestamp).toLocaleTimeString()} · {e.actor} · KB {e.kb_version}
+              </div>
+              <div className="hash" title={e.hash}>{e.hash.slice(0, 20)}… ← {e.prev_hash.slice(0, 12)}…</div>
+              {open === e.seq && <pre className="trace" style={{ marginTop: 6 }}>{JSON.stringify(e.payload, null, 1)}</pre>}
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

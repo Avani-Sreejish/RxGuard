@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import { AiVerified, DbFact, Escalation, Template } from "./Badges";
+import { Spinner } from "./Badges";
+import Icon from "./Icon";
 import type { Prescription } from "../types";
 
 interface AskResult {
@@ -63,177 +64,86 @@ export default function AskPanel({ rx }: { rx: Prescription }) {
   ];
 
   return (
-    <div className="card elevated">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <h2 style={{ margin: 0, fontSize: 14 }}>
-          <span>🤖</span> Clinical AI Copilot (/api/v1/ask)
-        </h2>
-        <span className="badge ai" style={{ fontSize: 10 }}>
-          Pydantic ToolPlan (max 3 read-only tools)
-        </span>
-      </div>
-      <p className="small muted" style={{ marginTop: 0, marginBottom: 10 }}>
-        The agent reasons strictly through read-only tools (<code>guideline_search</code>, <code>get_finding</code>, <code>interaction_lookup</code>). It answers only from verified chunks.
+    <div className="ask">
+      <p className="meta">
+        Ask about this prescription. Answers come only from its findings and the guideline documents, and never
+        include doses or dispensing decisions.
       </p>
 
-      {/* Suggested Prompt Chips */}
       <div className="prompt-chips">
         {dynamicChips.map((chip, i) => (
-          <button
-            key={i}
-            className="chip"
-            onClick={() => ask(chip)}
-            disabled={busy || !rx.session_id}
-          >
-            ✦ {chip}
+          <button key={i} className="chip" onClick={() => ask(chip)} disabled={busy || !rx.session_id}>
+            {chip}
           </button>
         ))}
       </div>
 
-      <div className="chat">
-        {msgs.length === 0 && (
-          <div style={{ textAlign: "center", padding: "20px 0", color: "var(--muted)", fontSize: 12.5 }}>
-            No questions asked yet in this session. Click a suggested prompt above or type below.
-          </div>
-        )}
+      <div className="chat" aria-live="polite">
+        {msgs.length === 0 && <p className="panel-empty-line">No questions asked yet. Pick a suggestion or type below.</p>}
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
-            <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 2, opacity: 0.8 }}>
-              {m.role === "user" ? "Pharmacist" : "RxGuard Agent"}
-            </div>
+            <div className="who-line">{m.role === "user" ? "You" : "RxGuard"}</div>
             <div>{m.content}</div>
             {m.payload && <AnswerMeta p={m.payload} />}
           </div>
         ))}
+        {busy && <div className="ev-loading"><Spinner /> Working…</div>}
       </div>
 
-      {err && <div className="error" style={{ marginBottom: 8 }}>{err}</div>}
+      {err && <div className="error">{err}</div>}
 
-      <div className="row">
+      <form className="ask-form" onSubmit={(e) => { e.preventDefault(); ask(q); }}>
         <input
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Ask a clinical guideline or interaction question..."
-          onKeyDown={(e) => e.key === "Enter" && ask(q)}
-          style={{ flex: 1 }}
+          placeholder="Ask about this prescription"
+          aria-label="Ask about this prescription"
           disabled={busy || !rx.session_id}
         />
-        <button className="btn primary" onClick={() => ask(q)} disabled={busy || !rx.session_id || !q.trim()}>
-          {busy ? <span className="spin" /> : "Ask Copilot"}
+        <button className="btn primary" disabled={busy || !rx.session_id || !q.trim()}>
+          {busy ? <Spinner /> : "Ask"}
         </button>
-      </div>
+      </form>
     </div>
   );
 }
 
 function AnswerMeta({ p }: { p: Partial<AskResult> }) {
+  const MODE: Record<string, string> = {
+    llm: "AI answer, checked against the sources",
+    template: "AI unavailable: database facts only",
+    refusal: "Declined: outside what RxGuard may answer",
+    insufficient: "Not enough evidence to answer",
+  };
   return (
-    <div className="small" style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--border)" }}>
-      <div className="row" style={{ gap: 6, marginBottom: 4 }}>
-        {p.mode === "llm" ? (
-          <AiVerified />
-        ) : p.mode === "template" ? (
-          <Template />
-        ) : (
-          <span className="badge tpl">{p.mode?.toUpperCase()}</span>
-        )}
-        {p.escalations?.map((e, i) => (
-          <Escalation key={i} code={e.reason_code} />
-        ))}
-      </div>
-
-      {!!p.tool_trace?.length && (
-        <div className="trace" style={{ marginTop: 6, padding: "6px 8px" }}>
-          <div style={{ fontWeight: 700, fontSize: 10.5, color: "var(--accent)", marginBottom: 2 }}>
-            ⚡ AGENT TOOL TRACE:
-          </div>
-          {p.tool_trace.map((t, i) => (
-            <div key={i} style={{ fontSize: 11 }}>
-              <code>{t.tool}</code>({JSON.stringify(t.args)}) → <span style={{ color: "var(--clear)" }}>{t.status}</span>
-            </div>
-          ))}
-        </div>
+    <div className="answer-meta">
+      {p.mode && <span className="meta">{MODE[p.mode] ?? p.mode}</span>}
+      {!!p.escalations?.length && (
+        <span className="warn-text small"><Icon name="flag" size={14} /> Flagged for pharmacist review: {p.escalations.map((e) => e.reason_code.replace(/_/g, " ").toLowerCase()).join(", ")}</span>
       )}
-
-      {!!p.claims?.length && (
-        <div style={{ marginTop: 6 }}>
-          {p.claims.map((c) => (
-            <div key={c.claim_id} className="row" style={{ fontSize: 11, margin: "2px 0" }}>
-              {c.source_type === "DATABASE" ? <DbFact /> : <AiVerified />}
-              <span className="mono">
-                {c.claim_id} → {c.source_type === "DATABASE" ? "interaction" : "guideline chunk"} #{c.source_id}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {!!p.dropped?.length && (
-        <div style={{ color: "var(--p1)", marginTop: 4, fontWeight: 600 }}>
-          ⚠️ {p.dropped.length} unverified claim(s) dropped by claim verifier
-        </div>
+        <span className="meta">{p.dropped.length} statement(s) removed because they could not be verified.</span>
       )}
-
       {!!p.evidence_cards?.length && (
-        <div style={{ marginTop: 10 }}>
-          <div
-            style={{
-              fontSize: 10.5,
-              fontWeight: 800,
-              color: "var(--accent)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: 6,
-            }}
-          >
-            📚 Verified Source Citations & Supporting Data ({p.evidence_cards.length}):
-          </div>
+        <details className="source">
+          <summary>Sources ({p.evidence_cards.length})</summary>
           {p.evidence_cards.map((c) => (
-            <div
-              key={c.chunk_id}
-              className="evidence"
-              style={{
-                marginBottom: 8,
-                padding: "8px 12px",
-                background: "var(--accent-soft)",
-                borderLeft: "3px solid var(--accent)",
-                borderRadius: "var(--radius)",
-              }}
-            >
-              <div
-                className="meta"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 4,
-                }}
-              >
-                <span>
-                  📄 <b>Verified File / Source:</b> {c.document} {c.page ? `· Page ${c.page}` : ""}
-                </span>
-                <span className="badge synth" style={{ fontSize: 9 }}>Chunk #{c.chunk_id}</span>
-              </div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
-                <b>Section / Context:</b> {c.section}
-              </div>
-              <blockquote
-                style={{
-                  margin: 0,
-                  padding: "6px 10px",
-                  background: "var(--surface)",
-                  borderRadius: "var(--radius)",
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  color: "var(--text)",
-                }}
-              >
-                🔍 <b>Verified Quote:</b> "{c.text.slice(0, 360)}{c.text.length > 360 ? "…" : ""}"
-              </blockquote>
-            </div>
+            <blockquote key={c.chunk_id}>
+              <b>{c.document}{c.page ? `, page ${c.page}` : ""}</b>
+              {"\n"}“{c.text.slice(0, 360)}{c.text.length > 360 ? "…" : ""}”
+            </blockquote>
           ))}
-        </div>
+        </details>
+      )}
+      {(!!p.tool_trace?.length || !!p.claims?.length) && (
+        <details className="source">
+          <summary>Details</summary>
+          <div className="trace" style={{ marginTop: 4 }}>
+            {p.tool_trace?.map((t, i) => <div key={i}>{t.tool}({JSON.stringify(t.args)}) → {t.status}</div>)}
+            {p.claims?.map((c) => <div key={c.claim_id}>{c.claim_id} → {c.source_type === "DATABASE" ? "interaction" : "chunk"} #{c.source_id}</div>)}
+          </div>
+        </details>
       )}
     </div>
   );

@@ -13,7 +13,7 @@ export const Degraded = () => <span className="badge degraded">DEGRADED RETRIEVA
 
 export function Prio({ p, rule, title }: { p: Priority; rule?: string; title?: string }) {
   return (
-    <span className={`prio ${p}`} title={title ?? "Queue-ordering label, not a clinical risk score"}>
+    <span className={`pill prio-${p}`} title={title ?? "Queue-ordering label, not a clinical risk score"}>
       {p}
       {rule ? ` · ${rule}` : ""}
     </span>
@@ -21,7 +21,15 @@ export function Prio({ p, rule, title }: { p: Priority; rule?: string; title?: s
 }
 
 export function Sev({ s }: { s: string }) {
-  return <span className={`sev ${s}`}>{s}</span>;
+  return <span className={`pill sev-${s}`}>{s}</span>;
+}
+
+export function Spinner({ label }: { label?: string }) {
+  return (
+    <span className="spinner" role="status" aria-label={label ?? "Loading"}>
+      <span />
+    </span>
+  );
 }
 
 export function Highlight({ text, span }: { text: string; span?: string }) {

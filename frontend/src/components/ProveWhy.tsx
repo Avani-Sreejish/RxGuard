@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { AiVerified, DbFact, Highlight, Insufficient, Prio, Sev, Template } from "./Badges";
+import { AiVerified, DbFact, Highlight, Insufficient, Prio, Sev, Spinner, Template } from "./Badges";
+import Icon from "./Icon";
 import type { Claim, EvidenceCard, Finding } from "../types";
 
 interface ProveData {
@@ -33,14 +34,14 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
   return (
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="row spread" style={{ marginBottom: 12 }}>
+        <div className="drawer-head">
           <h1>Prove this answer</h1>
-          <button className="btn" onClick={onClose}>
-            Close
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="x" />
           </button>
         </div>
         {err && <div className="error">{err}</div>}
-        {!d && !err && <span className="spin" />}
+        {!d && !err && <div className="page-loading"><Spinner /> Loading the evidence chain…</div>}
         {d && (
           <ol className="chain">
             <li>
@@ -91,8 +92,8 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
                   {d.database_record.source} {d.database_record.source_record_id}
                 </dd>
                 <dt>source file</dt>
-                <dd className="mono" style={{ color: "var(--accent)", fontWeight: 700 }}>
-                  📄 {d.database_record.source_file || "ddinter_downloads_code_*.csv"}
+                <dd className="mono" style={{ color: "var(--brand-strong)", fontWeight: 600 }}>
+                  {d.database_record.source_file || "ddinter_downloads_code_*.csv"}
                 </dd>
                 <dt>KB version</dt>
                 <dd className="mono">{d.database_record.kb_version}</dd>
@@ -104,8 +105,8 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
                 <div>
                   <Insufficient /> <span className="small">{d.finding.evidence_message || "No guideline chunks retrieved."}</span>
                   {!d.explanation && (
-                    <div className="small muted" style={{ marginTop: 6, fontStyle: "italic", background: "var(--surface)", padding: "6px 10px", borderRadius: 4 }}>
-                      💡 <b>Note:</b> Click the <b>"Explain"</b> button at the top right of the prescription view to run clinical guideline retrieval. Retrieved excerpts from guideline PDFs (e.g., <code>icmr_stw_cardiology_all.pdf</code>, <code>nlem2022.pdf</code>) with exact page numbers and highlighted cited text will appear here.
+                    <div className="note">
+                      <b>Note:</b> Click the <b>"Explain"</b> button at the top right of the prescription view to run clinical guideline retrieval. Retrieved excerpts from guideline PDFs (e.g., <code>icmr_stw_cardiology_all.pdf</code>, <code>nlem2022.pdf</code>) with exact page numbers and highlighted cited text will appear here.
                     </div>
                   )}
                 </div>
@@ -136,39 +137,6 @@ export default function ProveWhy({ findingId, onClose }: { findingId: number; on
                 </div>
               ))}
             </li>
-            <li>
-              <h4>Verifier result</h4>
-              <div className="small">
-                {d.claims_kept.length} kept · {d.claims_dropped.length} dropped. Checks: exists → whitelisted → DB exactness
-                → support ≥ threshold → scope (no dose / stop / switch / "safe").
-              </div>
-            </li>
-            <li>
-              <h4>Correlation IDs and trace</h4>
-              <dl className="kv">
-                <dt>check</dt>
-                <dd className="mono">{d.check_correlation_id}</dd>
-                <dt>explain</dt>
-                <dd className="mono">{d.explanation?.correlation_id ?? "—"}</dd>
-                <dt>explanation</dt>
-                <dd>
-                  {d.explanation ? `${d.explanation.mode} · ${d.explanation.model || "no model"} · ${d.explanation.prompt_version || "—"}` : "—"}
-                </dd>
-              </dl>
-              <div className="trace" style={{ marginTop: 6 }}>
-                {d.trace.tool_calls.map((t, i) => (
-                  <div key={i}>
-                    tool {t.tool} [{t.status}] {Math.round(t.latency_ms)} ms — {t.result_summary}
-                  </div>
-                ))}
-                {d.trace.llm_calls.map((l, i) => (
-                  <div key={`l${i}`}>
-                    llm {l.node} {l.model} [{l.status}] in={l.input_tokens} out={l.output_tokens} fallback={l.fallback_level}
-                  </div>
-                ))}
-                {d.trace.llm_calls.length === 0 && <div>0 LLM calls</div>}
-              </div>
-            </li>
           </ol>
         )}
       </div>
@@ -193,95 +161,36 @@ function ClaimRow({ c }: { c: Claim }) {
 export function ChunkCard({ e, span }: { e: EvidenceCard; span?: string }) {
   const verifiedSpan = span || e.support_span;
   return (
-    <div
-      className="evidence"
-      style={{
-        borderLeft: "3px solid var(--accent)",
-        background: "var(--accent-soft)",
-        borderRadius: "var(--radius)",
-        padding: "10px 14px",
-        marginTop: 8,
-      }}
-    >
-      <div
-        className="meta"
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 6,
-        }}
-      >
-        <div>
-          <span
-            style={{
-              fontSize: 10.5,
-              fontWeight: 800,
-              color: "var(--accent)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginRight: 6,
-            }}
-          >
-            📄 Verified Source File:
-          </span>
-          <b style={{ color: "var(--text)", fontSize: 13 }}>{e.file_name || e.document}</b>
-        </div>
-        <div className="row" style={{ gap: 6 }}>
-          {e.doc_type && <span className="badge synth" style={{ fontSize: 9.5 }}>{e.doc_type}</span>}
-          {e.page != null && <span className="badge esc" style={{ fontSize: 9.5 }}>Page {e.page}</span>}
-          <span className="mono small" style={{ color: "var(--muted)" }}>Chunk #{e.chunk_id}</span>
-        </div>
+    <div className="evidence">
+      <div className="meta">
+        <span className="row" style={{ gap: 6 }}>
+          <Icon name="file" size={15} />
+          <b style={{ color: "var(--ink)" }}>{e.file_name || e.document}</b>
+        </span>
+        <span className="row" style={{ gap: 6 }}>
+          {e.doc_type && <span className="tag tag-brand">{e.doc_type}</span>}
+          {e.page != null && <span className="tag tag-plain">page {e.page}</span>}
+          <span className="code">chunk #{e.chunk_id}</span>
+        </span>
       </div>
-
-      <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>
-        <b>Section / Policy Context:</b> {e.section}
-        {e.score != null ? ` · Retrieval score: ${e.score.toFixed(3)}` : ""}
-        {e.retrieval_mode === "fulltext" ? " · FULLTEXT (degraded)" : ""}
-        {e.matched_via && Object.keys(e.matched_via).length > 0 && (
-          <span style={{ marginLeft: 8 }}>
-            (matched: {Object.entries(e.matched_via).map(([d, v]) => `${d} via “${v}”`).join(" · ")})
-          </span>
-        )}
+      <div className="meta">
+        <span>
+          {e.section}
+          {e.score != null ? ` · retrieval score ${e.score.toFixed(3)}` : ""}
+          {e.retrieval_mode === "fulltext" ? " · FULLTEXT (degraded)" : ""}
+          {e.matched_via && Object.keys(e.matched_via).length > 0 && (
+            <> · matched: {Object.entries(e.matched_via).map(([d, v]) => `${d} via “${v}”`).join(" · ")}</>
+          )}
+        </span>
       </div>
-
       {verifiedSpan ? (
-        <div
-          style={{
-            margin: "6px 0",
-            padding: "8px 10px",
-            background: "rgba(59, 130, 246, 0.12)",
-            borderRadius: "var(--radius)",
-            border: "1px solid rgba(59, 130, 246, 0.35)",
-          }}
-        >
-          <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--accent)", marginBottom: 3 }}>
-            🔍 EXACT DATA USED TO VERIFY (CITED TEXT):
-          </div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.5 }}>
-            "{verifiedSpan}"
-          </div>
+        <div className="span-box">
+          <span className="lbl">Cited text used to verify</span>“{verifiedSpan}”
         </div>
       ) : null}
-
-      <details style={{ marginTop: 6, fontSize: 12, cursor: "pointer" }}>
-        <summary style={{ color: "var(--muted)", fontWeight: 600, fontSize: 11 }}>
-          View full source passage ({e.text.length} chars)
-        </summary>
-        <blockquote
-          style={{
-            marginTop: 6,
-            padding: "8px 10px",
-            background: "var(--surface)",
-            borderRadius: "var(--radius)",
-            maxHeight: 180,
-            overflow: "auto",
-            fontSize: 12,
-            lineHeight: 1.55,
-          }}
-        >
+      <details>
+        <summary>Full source passage ({e.text.length} chars)</summary>
+        <blockquote style={{ marginTop: 6 }}>
           <Highlight text={e.text} span={verifiedSpan} />
         </blockquote>
       </details>

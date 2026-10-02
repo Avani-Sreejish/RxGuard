@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import { Sev } from "../components/Badges";
+import { Sev, Spinner } from "../components/Badges";
 
 interface KbStats {
   kb_version: string;
@@ -156,10 +156,10 @@ export default function DatasetIngestion() {
 
   return (
     <>
-      <div className="row spread" style={{ marginBottom: 14 }}>
+      <header className="page-head">
         <div>
-          <h1>Knowledge Base & Dataset Ingestion</h1>
-          <p className="sub">
+          <h1>Knowledge-base uploads</h1>
+          <p className="muted" style={{ maxWidth: 760 }}>
             Administrators can add local interaction pairs and hospital guideline text. Uploads only add: existing DDInter records are never changed, and uploaded pairs are always shown as "Hospital upload", never as DDInter.
           </p>
         </div>
@@ -168,34 +168,21 @@ export default function DatasetIngestion() {
             <span className="zero-token">
               Active KB: <b>{stats.kb_version}</b>
             </span>
-            <span className="badge synth">
-              💊 {stats.counts.interactions.toLocaleString()} Interactions
-            </span>
-            <span className="badge esc">
-              📚 {stats.counts.documents} Guidelines
-            </span>
+            <span className="tag tag-plain">{stats.counts.interactions.toLocaleString()} interactions</span>
+            <span className="tag tag-plain">{stats.counts.documents} guideline documents</span>
           </div>
         )}
-      </div>
+      </header>
 
-      {/* Tabs */}
-      <div className="card" style={{ padding: "8px 12px", marginBottom: 16 }}>
-        <div className="row" style={{ gap: 10 }}>
-          <button
-            type="button"
-            className={`btn ${activeTab === "interactions" ? "primary" : ""}`}
-            onClick={() => setActiveTab("interactions")}
-          >
-            💊 Ingest Drug Interactions (CSV)
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === "guidelines" ? "primary" : ""}`}
-            onClick={() => setActiveTab("guidelines")}
-          >
-            📋 Ingest Clinical Guidelines (CSV/TXT)
-          </button>
-        </div>
+      <div className="seg" role="tablist" style={{ marginBottom: 16 }}>
+        <button type="button" role="tab" aria-selected={activeTab === "interactions"}
+          className={activeTab === "interactions" ? "on" : ""} onClick={() => setActiveTab("interactions")}>
+          Interaction pairs (CSV)
+        </button>
+        <button type="button" role="tab" aria-selected={activeTab === "guidelines"}
+          className={activeTab === "guidelines" ? "on" : ""} onClick={() => setActiveTab("guidelines")}>
+          Guideline text (CSV / TXT)
+        </button>
       </div>
 
       {/* Tab 1: Drug Interactions */}
@@ -210,7 +197,7 @@ export default function DatasetIngestion() {
                   className="btn sm"
                   onClick={() => downloadSample(SAMPLE_INTERACTIONS_CSV, "sample_interactions.csv")}
                 >
-                  📥 Download CSV Template
+                  Download template
                 </button>
                 <button
                   type="button"
@@ -220,7 +207,7 @@ export default function DatasetIngestion() {
                     setIntCsv(SAMPLE_INTERACTIONS_CSV);
                   }}
                 >
-                  🔄 Load format template
+                  Load format template
                 </button>
               </div>
             </div>
@@ -263,7 +250,7 @@ export default function DatasetIngestion() {
                     style={{ alignSelf: "flex-end" }}
                     onClick={() => setIntFile(null)}
                   >
-                    ✕ Clear file
+                    Clear file
                   </button>
                 )}
               </div>
@@ -271,7 +258,7 @@ export default function DatasetIngestion() {
               {intError && <div className="error" style={{ marginBottom: 12 }}>{intError}</div>}
 
               <button type="submit" className="btn primary" disabled={intLoading || (!intCsv && !intFile)}>
-                {intLoading ? <span className="spin" /> : "🚀 Ingest Interactions into Active KB"}
+                {intLoading ? <Spinner /> : "Add to current knowledge base"}
               </button>
             </form>
           </div>
@@ -280,7 +267,7 @@ export default function DatasetIngestion() {
             {intResult ? (
               <div className="card" style={{ border: "1px solid var(--p3)" }}>
                 <div className="row spread" style={{ marginBottom: 10 }}>
-                  <h2 style={{ margin: 0, color: "var(--p3)" }}>✓ Ingestion Complete</h2>
+                  <h2 style={{ margin: 0, color: "var(--p3)" }}>Upload complete</h2>
                   <span className="badge esc">{intResult.total_interactions_now.toLocaleString()} Total in KB</span>
                 </div>
                 <div className="grid2" style={{ gap: 8, marginBottom: 12 }}>
@@ -337,7 +324,7 @@ export default function DatasetIngestion() {
               </div>
             ) : (
               <div className="card" style={{ background: "var(--accent-soft)" }}>
-                <h3>💡 How Interaction Ingestion Works</h3>
+                <h3>How interaction uploads work</h3>
                 <ul style={{ paddingLeft: 18, lineHeight: 1.6, color: "var(--text)" }}>
                   <li>
                     <b>Canonical Ordering:</b> Pairs are automatically ordered so <code>A ↔ B</code> and <code>B ↔ A</code> map to the same unique relation.
@@ -367,7 +354,7 @@ export default function DatasetIngestion() {
                   className="btn sm"
                   onClick={() => downloadSample(SAMPLE_GUIDELINES_CSV, "sample_guidelines.csv")}
                 >
-                  📥 Download CSV Template
+                  Download template
                 </button>
                 <button
                   type="button"
@@ -377,7 +364,7 @@ export default function DatasetIngestion() {
                     setGuideCsv(SAMPLE_GUIDELINES_CSV);
                   }}
                 >
-                  🔄 Load format template
+                  Load format template
                 </button>
               </div>
             </div>
@@ -451,7 +438,7 @@ export default function DatasetIngestion() {
                     style={{ alignSelf: "flex-end" }}
                     onClick={() => setGuideFile(null)}
                   >
-                    ✕ Clear file
+                    Clear file
                   </button>
                 )}
               </div>
@@ -459,7 +446,7 @@ export default function DatasetIngestion() {
               {guideError && <div className="error" style={{ marginBottom: 12 }}>{guideError}</div>}
 
               <button type="submit" className="btn primary" disabled={guideLoading || (!guideCsv && !guideFile)}>
-                {guideLoading ? <span className="spin" /> : "🚀 Ingest Guidelines into Corpus"}
+                {guideLoading ? <Spinner /> : "Add to guideline corpus"}
               </button>
             </form>
           </div>
@@ -468,7 +455,7 @@ export default function DatasetIngestion() {
             {guideResult ? (
               <div className="card" style={{ border: "1px solid var(--p3)" }}>
                 <div className="row spread" style={{ marginBottom: 10 }}>
-                  <h2 style={{ margin: 0, color: "var(--p3)" }}>✓ Guideline Document Indexed</h2>
+                  <h2 style={{ margin: 0, color: "var(--p3)" }}>Guideline indexed</h2>
                   <span className="badge esc">{guideResult.doc_type}</span>
                 </div>
                 <div className="grid2" style={{ gap: 8, marginBottom: 12 }}>
@@ -513,7 +500,7 @@ export default function DatasetIngestion() {
               </div>
             ) : (
               <div className="card" style={{ background: "var(--accent-soft)" }}>
-                <h3>💡 How Guideline Indexing Works</h3>
+                <h3>How guideline uploads work</h3>
                 <ul style={{ paddingLeft: 18, lineHeight: 1.6, color: "var(--text)" }}>
                   <li>
                     <b>Corpus Document Registration:</b> Documents are registered with SHA-256 provenance in the active knowledge base.

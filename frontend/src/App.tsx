@@ -1,12 +1,30 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, getToken, setToken } from "./api";
+import Icon, { RxMark } from "./components/Icon";
+import { Spinner } from "./components/Badges";
 import Queue from "./pages/Queue";
 import NewCheck from "./pages/NewCheck";
 import Detail from "./pages/Detail";
-import JudgePanel from "./pages/JudgePanel";
-import Observability from "./pages/Observability";
 import Sources from "./pages/Sources";
-import DatasetIngestion from "./pages/DatasetIngestion";
+import Admin from "./pages/Admin";
+
+export type Lang = "en" | "hi" | "ml";
+const LANGS: { code: Lang; label: string; name: string }[] = [
+  { code: "en", label: "EN", name: "English" },
+  { code: "hi", label: "हिंदी", name: "Hindi" },
+  { code: "ml", label: "മലയാളം", name: "Malayalam" },
+];
+const LANG_KEY = "rxguard.lang";
+
+function initialLang(): Lang {
+  try {
+    const l = localStorage.getItem(LANG_KEY);
+    if (l === "hi" || l === "ml") return l;
+  } catch {
+    /* storage unavailable */
+  }
+  return "en";
+}
 
 export interface Me {
   username: string;
@@ -15,7 +33,7 @@ export interface Me {
   kb_version: string | null;
 }
 
-// Minimal hash router: #/queue, #/new, #/rx/12, #/attack, #/obs, #/sources
+// Minimal hash router: #/queue, #/new, #/rx/12, #/admin/uploads, #/sources
 function useRoute(): [string[], (r: string) => void] {
   const parse = () => (window.location.hash.replace(/^#\/?/, "") || "queue").split("/");
   const [route, setRoute] = useState(parse);
@@ -31,6 +49,15 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);
   const [route, go] = useRoute();
+  const [lang, setLangState] = useState<Lang>(initialLang);
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem(LANG_KEY, l);
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   useEffect(() => {
     if (!getToken()) return setChecked(true);
@@ -43,63 +70,75 @@ export default function App() {
   if (!checked) return null;
   if (!me) return <Login onLogin={setMe} />;
 
-  const tabs: [string, string, string][] = [
-    ["queue", "📋", "Review queue"],
-    ["new", "➕", "New check"],
-    ...(me.is_admin ? [["dataset", "📥", "Dataset Ingestion"] as [string, string, string]] : []),
-    ["attack", "⚔️", "Judge Attack"],
-    ["obs", "📈", "Observability"],
-    ["sources", "📚", "Sources & licences"],
+  // [route, icon, label, routes that keep the tab highlighted]
+  const tabs: [string, string, string, string[]][] = [
+    ["queue", "list", "Review queue", ["queue", "rx"]],
+    ["new", "plus", "New check", ["new"]],
+    ...(me.is_admin ? [["admin", "database", "Knowledge base", ["admin"]] as [string, string, string, string[]]] : []),
   ];
   const page = route[0];
 
   return (
     <>
-      <div className="synthetic-strip">
-        SYNTHETIC DEMO DATA · Clinical Decision Support for Pharmacists · Never for Patient Direct Use
+      <a href="#main" className="skip">Skip to content</a>
+      <div className="synthetic-strip" role="note">
+        Demo with synthetic prescriptions · Supports the pharmacist's review, never replaces it
       </div>
       <header className="topbar">
-        <div className="brand cursor-pointer" onClick={() => go("queue")}>
-          <span className="brand-mark">Rx</span>
-          <span>RxGuard</span>
-        </div>
-        <nav className="nav">
-          {tabs.map(([k, icon, label]) => (
-            <button key={k} className={page === k ? "active" : ""} onClick={() => go(k)}>
-              <span style={{ marginRight: 5 }}>{icon}</span>
-              {label}
-            </button>
+        <a href="#/queue" className="brand">
+          <RxMark size={30} />
+          <span className="brand-name">RxGuard</span>
+        </a>
+        <nav aria-label="Main">
+          {tabs.map(([k, icon, label, match]) => (
+            <a key={k} href={`#/${k}`} className={match.includes(page) ? "on" : ""}>
+              <Icon name={icon} size={17} />
+              <span>{label}</span>
+            </a>
           ))}
         </nav>
-        <div className="who">
-          <div className="status-pill">
-            <span className="status-dot"></span>
-            <span>KB {me.kb_version ?? "v1"} (160k pairs)</span>
+        <div className="topbar-right">
+          <div className="langswitch" role="group" aria-label="Language">
+            {LANGS.map((l) => (
+              <button key={l.code} type="button" lang={l.code} title={l.name} aria-pressed={lang === l.code}
+                className={lang === l.code ? "on" : ""} onClick={() => setLang(l.code)}>
+                {l.label}
+              </button>
+            ))}
           </div>
-          <span style={{ fontWeight: 600, color: "var(--text)" }}>
-            {me.username}
-            {me.is_admin ? " (admin)" : ""}
+          <span className="who" title={me.username}>
+            <Icon name="user" size={17} />
+            <span>
+              {me.username}
+              {me.is_admin ? " (admin)" : ""}
+            </span>
           </span>
           <button
-            className="btn sm"
+            className="icon-btn"
+            aria-label="Sign out"
+            title="Sign out"
             onClick={() => {
               setToken(null);
               setMe(null);
             }}
           >
-            Sign out
+            <Icon name="logout" />
           </button>
         </div>
       </header>
-      <main>
-        {page === "queue" && <Queue open={(id) => go(`rx/${id}`)} />}
-        {page === "new" && <NewCheck done={(id) => go(`rx/${id}`)} />}
-        {page === "dataset" && <DatasetIngestion />}
-        {page === "rx" && route[1] && <Detail id={Number(route[1])} key={route[1]} />}
-        {page === "attack" && <JudgePanel me={me} open={(id) => go(`rx/${id}`)} />}
-        {page === "obs" && <Observability />}
-        {page === "sources" && <Sources />}
+      <main id="main">
+        <div className="page">
+          {page === "queue" && <Queue open={(id) => go(`rx/${id}`)} />}
+          {page === "new" && <NewCheck done={(id) => go(`rx/${id}`)} />}
+                    {page === "rx" && route[1] && <Detail id={Number(route[1])} key={route[1]} lang={lang} />}
+          {page === "admin" && me.is_admin && <Admin section={route[1]} />}
+          {page === "sources" && <Sources />}
+        </div>
       </main>
+      <footer className="app-foot">
+        <a href="#/sources">Data sources &amp; licences</a>
+        <span>Knowledge base {me.kb_version ?? "—"}</span>
+      </footer>
     </>
   );
 }
@@ -107,6 +146,7 @@ export default function App() {
 function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   const [u, setU] = useState("pharmacist");
   const [p, setP] = useState("rxguard-demo");
+  const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -131,53 +171,57 @@ function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   };
 
   return (
-    <div className="login card elevated">
-      <div className="brand" style={{ marginBottom: 8, justifyContent: "center" }}>
-        <span className="brand-mark" style={{ width: 32, height: 32, fontSize: 16 }}>Rx</span>
-        <span style={{ fontSize: 20 }}>RxGuard</span>
-      </div>
-      <p className="sub" style={{ textAlign: "center", marginBottom: 18 }}>
-        Evidence-proven prescription review · Pharmacist sign-in only
-      </p>
-
-      <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
-        <label className="field">
-          Username
-          <input type="text" value={u} onChange={(e) => setU(e.target.value)} autoFocus />
-        </label>
-        <label className="field">
-          Password
-          <input type="password" value={p} onChange={(e) => setP(e.target.value)} />
-        </label>
-        {err && <div className="error">{err}</div>}
-        <button className="btn primary" type="submit" disabled={loading} style={{ height: 40, marginTop: 4 }}>
-          {loading ? <span className="spin" /> : "Sign in to Workspace"}
-        </button>
-      </form>
-
-      <div style={{ marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--border)", fontSize: 12 }}>
-        <div style={{ color: "var(--muted)", marginBottom: 8, textAlign: "center", fontWeight: 600 }}>
-          Quick Demo Credentials:
-        </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => quickFill("pharmacist")}
-            title="Standard Pharmacist Account"
-          >
-            👤 Pharmacist
-          </button>
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => quickFill("admin")}
-            title="Admin with Judge Attack toggles"
-          >
-            🛡️ Admin
-          </button>
-        </div>
-      </div>
+    <div className="login">
+      <div className="login-photo" aria-hidden />
+      <header className="login-top" />
+      <main className="login-main">
+        <section className="login-panel" aria-labelledby="login-h">
+          <div className="brand brand-lg">
+            <RxMark size={44} />
+            <div>
+              <div className="brand-name">RxGuard</div>
+              <div className="brand-tag">Evidence-proven prescription review for pharmacists</div>
+            </div>
+          </div>
+          <form onSubmit={submit} className="login-form">
+            <h1 id="login-h">Sign in to RxGuard</h1>
+            <label className="field">
+              <span>Username</span>
+              <input type="text" autoComplete="username" value={u} onChange={(e) => setU(e.target.value)} autoFocus />
+            </label>
+            <label className="field">
+              <span>Password</span>
+              <span className="pw">
+                <input type={show ? "text" : "password"} autoComplete="current-password" value={p}
+                  onChange={(e) => setP(e.target.value)} />
+                <button type="button" className="pw-toggle" onClick={() => setShow((s) => !s)}
+                  aria-label={show ? "Hide password" : "Show password"}>
+                  <Icon name={show ? "eyeOff" : "eye"} />
+                </button>
+              </span>
+            </label>
+            {err && <p className="err-text" role="alert">{err}</p>}
+            <button className="btn primary btn-block" type="submit" disabled={loading}>
+              {loading ? <><Spinner /> Signing in…</> : "Sign in"}
+            </button>
+          </form>
+          <div className="login-demo">
+            <span>Quick demo credentials</span>
+            <div className="login-quick">
+              <button type="button" className="btn sm ghost" onClick={() => quickFill("pharmacist")} title="Standard pharmacist account">
+                <Icon name="user" size={15} /> Pharmacist
+              </button>
+              <button type="button" className="btn sm ghost" onClick={() => quickFill("admin")} title="Admin with Judge Attack toggles">
+                <Icon name="shield" size={15} /> Admin
+              </button>
+            </div>
+          </div>
+          <p className="login-foot">
+            <Icon name="shield" size={16} />
+            For registered pharmacists. RxGuard supports your review; the dispensing decision stays with you.
+          </p>
+        </section>
+      </main>
     </div>
   );
 }

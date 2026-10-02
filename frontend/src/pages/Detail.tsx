@@ -1,397 +1,455 @@
-import { useCallback, useEffect, useState } from "react";
+// Review screen, read top to bottom: what needs attention, the medicines, then each interaction
+// (database fact, guideline evidence, the pharmacist's action). Provenance details sit behind
+// "How was this found?" and the History tab.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import { AiVerified, DbFact, Degraded, Escalation, Insufficient, Prio, Sev, Synthetic, Template, Unresolved } from "../components/Badges";
+import type { Lang } from "../App";
+import { Highlight, Sev, Spinner, Synthetic } from "../components/Badges";
+import Icon from "../components/Icon";
 import InteractionMap from "../components/InteractionMap";
-import ProveWhy, { ChunkCard } from "../components/ProveWhy";
+import ProveWhy from "../components/ProveWhy";
 import AskPanel from "../components/AskPanel";
 import AuditTrail from "../components/AuditTrail";
-import type { Finding, Item, Prescription } from "../types";
+import type { Claim, Finding, Item, Prescription, Review } from "../types";
 
-const ACTIONS = ["ACKNOWLEDGE", "ESCALATE", "REQUEST_MORE_EVIDENCE", "MARK_FOR_FOLLOW_UP"] as const;
+const DONE_LABEL: Record<string, string> = {
+  ACKNOWLEDGE: "Acknowledged",
+  ESCALATE: "Escalated to prescriber",
+  REQUEST_MORE_EVIDENCE: "More evidence requested",
+  MARK_FOR_FOLLOW_UP: "Marked for follow-up",
+};
+export const PRIORITY_LABEL: Record<string, string> = {
+  P1: "Act now",
+  P2: "Review",
+  P3: "Low priority",
+  CLEAR: "No interactions recorded",
+};
+const LANG_NAME: Record<string, string> = { hi: "Hindi", ml: "Malayalam" };
+type Tab = "review" | "map" | "ask" | "history";
 
-export default function Detail({ id }: { id: number }) {
+export default function Detail({ id, lang }: { id: number; lang: Lang }) {
   const [rx, setRx] = useState<Prescription | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState("");
-  const [sel, setSel] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
   const [prove, setProve] = useState<number | null>(null);
   const [gate, setGate] = useState<string[]>([]);
   const [auditKey, setAuditKey] = useState(0);
-  const [lang, setLang] = useState<"en" | "hi" | "ml">("en");
+  const [tab, setTab] = useState<Tab>("review");
   const [translations, setTranslations] = useState<Record<string, Record<number, any>>>({});
-  const [transLoading, setTransLoading] = useState(false);
-
-  const toggleLanguage = async (l: "en" | "hi" | "ml") => {
-    setLang(l);
-    if (l !== "en" && !translations[l]) {
-      setTransLoading(true);
-      try {
-        const res = await api<{ translated_findings: any[] }>(`/api/v1/prescriptions/${id}/translate`, {
-          body: { language: l },
-        });
-        const map: Record<number, any> = {};
-        res.translated_findings.forEach((tf: any) => {
-          map[tf.finding_id] = tf;
-        });
-        setTranslations((prev) => ({ ...prev, [l]: map }));
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setTransLoading(false);
-      }
-    }
-  };
+  const explained = useRef(false);
 
   const load = useCallback(() => {
     api<Prescription>(`/api/v1/prescriptions/${id}`).then(setRx).catch((e) => setErr(e.message));
   }, [id]);
   useEffect(load, [load]);
 
+  // Each finding's database record in Hindi / Malayalam (fixed wording, no LLM; see the translate view).
+  useEffect(() => {
+    if (lang === "en" || translations[lang] || !rx?.findings.length) return;
+    api<{ translated_findings: any[] }>(`/api/v1/prescriptions/${id}/translate`, { body: { language: lang } })
+      .then((res) => {
+        const map: Record<number, any> = {};
+        res.translated_findings.forEach((tf) => (map[tf.finding_id] = tf));
+        setTranslations((prev) => ({ ...prev, [lang]: map }));
+      })
+      .catch(() => undefined);
+  }, [lang, id, rx?.findings.length, translations]);
+
   const run = async (label: string, fn: () => Promise<Prescription | void>) => {
     setBusy(label);
     setErr("");
     try {
       const r = await fn();
-      if (r) setRx({ ...r, llm_usage: r.llm_usage ?? rx?.llm_usage, tool_trace: r.tool_trace ?? rx?.tool_trace });
+      if (r) setRx((cur) => ({ ...r, llm_usage: r.llm_usage ?? cur?.llm_usage, tool_trace: r.tool_trace ?? cur?.tool_trace }));
       setAuditKey((k) => k + 1);
+      if (label !== "explain") setGate([]);
     } catch (e) {
       const ae = e as ApiError;
-      setErr(`${ae.status ?? ""} ${ae.message}`);
-      if (ae.code === "review_gate_not_met") setGate(((ae.details as any)?.reasons as string[]) ?? []);
+      if (ae.code === "review_gate_not_met") setGate(((ae.details as any)?.reasons as string[]) ?? [ae.message]);
+      else setErr(ae.message);
     } finally {
       setBusy("");
     }
   };
+  const explain = () => run("explain", () => api(`/api/v1/explain`, { body: { prescription_id: id } }));
 
-  if (!rx) return err ? <div className="error">{err}</div> : <span className="spin" />;
+  // Guideline evidence is looked up once, the first time a prescription with interactions is opened.
+  useEffect(() => {
+    if (!rx || rx.explanation || !rx.findings.length || explained.current) return;
+    explained.current = true;
+    void explain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rx]);
+
+  if (!rx)
+    return err ? <div className="error">{err}</div> : <div className="page-loading"><Spinner /> Loading prescription…</div>;
+
   const explanation = rx.explanation;
-  const claimsFor = (f: Finding) => explanation?.claims.filter((c) => c.finding_ordinal === f.ordinal) ?? [];
-  const droppedCount = explanation?.dropped.length ?? 0;
+  const claimsFor = (f: Finding) =>
+    explanation?.claims.filter((c) => c.finding_ordinal === f.ordinal && c.source_type === "RAG_CHUNK") ?? [];
+  const unresolved = rx.items.filter((i) => !i.drug_id && i.method !== "pharmacist");
+  const urgent = rx.findings.filter((f) => f.priority === "P1");
+  const others = rx.findings.filter((f) => f.priority !== "P1");
+  const needConfirm = rx.items.filter((i) => !i.drug_id || i.method === "pharmacist");
+  const required = urgent.length + needConfirm.length;
+  const done = urgent.filter((f) => f.reviews.length).length + needConfirm.filter((i) => i.method === "pharmacist").length;
+  const completed = rx.status === "REVIEWED";
+  const medCount = new Set(rx.items.filter((i) => i.drug_id).map((i) => i.drug_id)).size;
+  const majors = rx.findings.filter((f) => f.severity === "Major").length;
+  const act = (f: { id: number }, target?: "duplication") => (action: string, note: string) =>
+    run("review", () => api(`/api/v1/reviews/${f.id}`, { body: target ? { action, note, target } : { action, note } }));
+  const showFinding = (fid: number) => {
+    setTab("review");
+    setOpen(fid);
+    setTimeout(() => document.getElementById(`finding-${fid}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  };
+
+  const headline = rx.findings.length === 0
+    ? `No interaction recorded between the ${medCount} medicine${medCount === 1 ? "" : "s"}.`
+    : `${rx.findings.length} interaction${rx.findings.length === 1 ? "" : "s"} between ${medCount} medicines` +
+      (majors ? `, ${majors} Major.` : ".");
 
   return (
-    <>
-      <div className="row spread" style={{ marginBottom: 12 }}>
-        <div>
-          <h1>
-            Prescription #{rx.id} <Prio p={rx.priority} />
-          </h1>
-          <div className="sub">
-            {rx.status.replace(/_/g, " ").toLowerCase()} · checked against KB <b>{rx.kb_version}</b>
-            {rx.current_kb_version !== rx.kb_version && <> · current KB <b>{rx.current_kb_version}</b></>} · age band{" "}
-            {rx.age_band} · <span className="mono">{rx.correlation_id}</span>
-          </div>
-        </div>
-        <div className="row">
-          <span className="zero-token" title="LLM tokens used by the deterministic check">
-            /check: {rx.llm_tokens_check.input + rx.llm_tokens_check.output} LLM tokens
-          </span>
-          <button className="btn primary" disabled={!!busy || rx.findings.length === 0}
-            onClick={() => run("explain", () => api(`/api/v1/explain`, { body: { prescription_id: rx.id } }))}>
-            {busy === "explain" ? <span className="spin" /> : explanation ? "Re-explain" : "Explain"}
-          </button>
-          <button className="btn" disabled={!!busy}
-            onClick={() => run("complete", async () => { setGate([]); return api(`/api/v1/prescriptions/${rx.id}/complete`, { method: "POST" }); })}>
-            Complete review
-          </button>
-        </div>
-      </div>
+    <div className="review">
+      <a href="#/queue" className="back"><Icon name="arrowLeft" size={16} /> Review queue</a>
 
-      {rx.banners.map((b, i) => (
-        <div key={i} className={`banner ${b.kind}`}>
-          <Escalation code={b.kind} />
-          <span>
-            {b.text}
-            {b.patterns && <span className="mono small"> matched: {b.patterns.join(", ")}</span>}
-            {b.terms && <span className="mono small"> terms: {b.terms.join(", ")}</span>}
+      <header className="rx-header">
+        <div className="rx-title">
+          <div>
+            <h1>Prescription #{rx.id}</h1>
+            <p className="meta">
+              Patient age {rx.age_band === "unknown" ? "not given" : rx.age_band} · checked{" "}
+              {new Date(rx.created_at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+          <span className={`pill pill-lg prio-${rx.priority}`} title="Orders the queue; not a clinical risk score">
+            {PRIORITY_LABEL[rx.priority]}
           </span>
+        </div>
+
+        <p className="headline">{headline}</p>
+        {unresolved.length > 0 && (
+          <p className="headline-sub warn-text">
+            <Icon name="alert" size={16} /> {unresolved.length} medicine{unresolved.length === 1 ? " was" : "s were"} not recognised. Please confirm {unresolved.length === 1 ? "it" : "them"} below.
+          </p>
+        )}
+
+        <div className="rx-progress">
+          {completed ? (
+            <span className="ok-text done-badge"><Icon name="check" /> Review completed</span>
+          ) : (
+            <>
+              <div className="progress-wrap">
+                <div className="progress-label">
+                  {required === 0 ? "No required steps" : <><b>{done}</b> of {required} required steps done</>}
+                </div>
+                <div className="progress" aria-hidden>
+                  <span style={{ width: `${required ? (100 * done) / required : 100}%` }} />
+                </div>
+              </div>
+              <button className="btn primary" disabled={!!busy}
+                onClick={() => run("complete", () => api(`/api/v1/prescriptions/${rx.id}/complete`, { method: "POST" }))}>
+                {busy === "complete" ? <Spinner /> : <Icon name="check" size={16} />} Complete review
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {rx.banners.filter((b) => b.kind !== "UNRESOLVED").map((b, i) => (
+        <div key={i} className={`banner banner-${b.kind}`} role="alert">
+          <Icon name={b.kind === "INJECTION" ? "shield" : "alert"} />
+          <p>{b.text}</p>
         </div>
       ))}
-      {err && <div className="error" style={{ marginBottom: 8 }}>{err}</div>}
       {gate.length > 0 && (
-        <div className="banner UNRESOLVED">
-          <span>
-            <b>Review cannot be completed yet:</b>
-            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{gate.map((g) => <li key={g}>{g}</li>)}</ul>
-          </span>
+        <div className="banner banner-gate" role="alert">
+          <Icon name="info" />
+          <div>
+            <p><b>Before you can complete this review:</b></p>
+            <ul>{gate.map((g) => <li key={g}>{g}</li>)}</ul>
+          </div>
+        </div>
+      )}
+      {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <div className="page-tabs" role="tablist">
+        {([["review", "Review"], ["map", "Map"], ["ask", "Ask a question"], ["history", "History"]] as [Tab, string][]).map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "review" && (
+        <div className="stack">
+          <section className="panel" aria-labelledby="meds-h">
+            <h2 id="meds-h">Medicines</h2>
+            <ul className="med-rows">
+              {rx.items.map((i, n) => (
+                <MedRow key={i.id} n={n + 1} i={i} onConfirm={(item, drugId) =>
+                  run("confirm", () => api(`/api/v1/prescriptions/${rx.id}/items/${item.id}/confirm`,
+                    { body: drugId ? { drug_id: drugId } : { not_in_database: true } }))} />
+              ))}
+            </ul>
+          </section>
+
+          {busy === "explain" && <p className="ev-loading"><Spinner /> Looking up guideline evidence…</p>}
+          {!busy && !explanation && rx.findings.length > 0 && (
+            <p className="note">
+              Guideline evidence has not been loaded. <button className="linkish sm" onClick={explain}>Look it up now</button>
+            </p>
+          )}
+          {explanation?.mode === "template" && (
+            <p className="note">The AI explanation is unavailable, so only database facts and retrieved guideline text are shown.</p>
+          )}
+          {!!explanation?.dropped.length && (
+            <p className="note">{explanation.dropped.length} AI statement(s) were removed because they could not be verified against a source.</p>
+          )}
+          {lang !== "en" && rx.findings.length > 0 && (
+            <p className="note">Each interaction is also shown in {LANG_NAME[lang]}. Medicine names and guideline text stay in English.</p>
+          )}
+
+          {rx.findings.length === 0 && (
+            <div className="clear-card">
+              <Icon name="check" size={24} />
+              <div>
+                <h3>No interaction recorded</h3>
+                <p>{rx.absent_pairs_wording} for any of the {rx.pairs_checked} pair(s) checked. That does not mean the combination is safe.</p>
+              </div>
+            </div>
+          )}
+
+          {urgent.length > 0 && (
+            <section aria-labelledby="urgent-h">
+              <h2 id="urgent-h" className="group-h">Needs your action <span className="count">{urgent.length}</span></h2>
+              <div className="stack-sm">
+                {urgent.map((f) => (
+                  <FindingCard key={f.id} f={f} claims={claimsFor(f)} busy={!!busy} explaining={busy === "explain"}
+                    hasExplanation={!!explanation} tr={lang !== "en" ? translations[lang]?.[f.id] : undefined} lang={lang}
+                    onProve={() => setProve(f.id)} onAct={act(f)} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {(others.length > 0 || rx.duplications.length > 0) && (
+            <section aria-labelledby="other-h">
+              <h2 id="other-h" className="group-h">
+                {urgent.length ? "Other interactions" : "Interactions"} <span className="count">{others.length + rx.duplications.length}</span>
+              </h2>
+              {urgent.length > 0 && <p className="meta" style={{ marginBottom: 8 }}>No action required. Open one to see the details.</p>}
+              <div className="stack-sm">
+                {others.map((f) =>
+                  open === f.id || urgent.length === 0 ? (
+                    <FindingCard key={f.id} f={f} claims={claimsFor(f)} busy={!!busy} explaining={busy === "explain"}
+                      hasExplanation={!!explanation} tr={lang !== "en" ? translations[lang]?.[f.id] : undefined} lang={lang}
+                      onProve={() => setProve(f.id)} onAct={act(f)}
+                      onCollapse={urgent.length ? () => setOpen(null) : undefined} />
+                  ) : (
+                    <button key={f.id} id={`finding-${f.id}`} type="button" className="frow" onClick={() => setOpen(f.id)}>
+                      <span className="frow-pair">{f.drug_a} <span className="plus">+</span> {f.drug_b}</span>
+                      {f.reviews.length > 0 && <span className="ok-text small"><Icon name="check" size={14} /> {DONE_LABEL[f.reviews[f.reviews.length - 1].action]}</span>}
+                      <Sev s={f.severity} />
+                      <Icon name="chevron" size={16} />
+                    </button>
+                  ),
+                )}
+                {rx.duplications.map((d) => (
+                  <article key={`d${d.id}`} className="fcard">
+                    <div className="fcard-head">
+                      <h3>Same ingredient twice: {d.drug}</h3>
+                    </div>
+                    <p className="fact">Appears on: {d.item_labels.join("; ")}</p>
+                    <ActionBar reviews={d.reviews} busy={!!busy} onAct={act(d, "duplication")} />
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <p className="fine-print">
+            {rx.findings.length > 0 && rx.absent_pairs_count > 0 &&
+              `No interaction recorded for the other ${rx.absent_pairs_count} pair(s); that does not mean those combinations are safe. `}
+            Medicines are checked in pairs only; nothing is claimed about three or more taken together.
+          </p>
         </div>
       )}
 
-      <div className="grid2">
-        <div>
-          <Resolution rx={rx} onConfirm={(item, drugId) =>
-            run("confirm", () => api(`/api/v1/prescriptions/${rx.id}/items/${item.id}/confirm`,
-              { body: drugId ? { drug_id: drugId } : { not_in_database: true } }))} />
-
-          <div className="card">
-            <div className="row spread" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0 }}><span className="step">3</span>Findings ({rx.findings.length})</h2>
-              <div className="row" style={{ gap: 4 }}>
-                <span className="small muted">Language:</span>
-                <button
-                  type="button"
-                  className={`btn sm ${lang === "en" ? "primary" : ""}`}
-                  onClick={() => toggleLanguage("en")}
-                >
-                  English
-                </button>
-                <button
-                  type="button"
-                  className={`btn sm ${lang === "hi" ? "primary" : ""}`}
-                  onClick={() => toggleLanguage("hi")}
-                >
-                  {transLoading && lang === "hi" ? <span className="spin" /> : "🇮🇳 हिंदी"}
-                </button>
-                <button
-                  type="button"
-                  className={`btn sm ${lang === "ml" ? "primary" : ""}`}
-                  onClick={() => toggleLanguage("ml")}
-                >
-                  {transLoading && lang === "ml" ? <span className="spin" /> : "🌴 മലയാളം"}
-                </button>
-              </div>
-            </div>
-            {rx.findings.length === 0 && (
-              <p className="muted">
-                {rx.absent_pairs_wording} for any of the {rx.pairs_checked} pair(s) checked. This is not a statement that
-                the combination is safe.
-              </p>
-            )}
-            {rx.findings.length > 0 && rx.absent_pairs_count > 0 && (
-              <p className="small muted">
-                {rx.absent_pairs_count} of {rx.pairs_checked} pairs: {rx.absent_pairs_wording}.
-              </p>
-            )}
-            {explanation && (
-              <div className="row small" style={{ marginBottom: 8 }}>
-                {explanation.mode === "template" ? <Template /> : <AiVerified />}
-                {explanation.degraded_retrieval && <Degraded />}
-                {droppedCount > 0 && (
-                  <span style={{ color: "var(--p2)" }}>
-                    {droppedCount} claim(s) removed by the verifier: {explanation.dropped.map((d) => `${d.claim_id} (${d.reason})`).join("; ")}
-                  </span>
-                )}
-                {rx.llm_usage && <span className="muted">explain LLM calls {rx.llm_usage.calls} · tokens in {rx.llm_usage.input_tokens} / out {rx.llm_usage.output_tokens}</span>}
-              </div>
-            )}
-            {rx.findings.map((f) => (
-              <div
-                key={f.id}
-                id={`finding-${f.id}`}
-                className={`finding ${sel === f.id ? "sel" : ""}`}
-                onClick={() => setSel(f.id)}
-              >
-                <div className="row spread">
-                  <span className="pair">
-                    #{f.ordinal} {f.drug_a} ↔ {f.drug_b}
-                  </span>
-                  <span className="row">
-                    <Prio p={f.priority} rule={f.rule_id} title={`${f.rule_id}: ${f.rule_description}`} />
-                    <button className="btn sm" onClick={(e) => { e.stopPropagation(); setProve(f.id); }}>
-                      Prove why
-                    </button>
-                  </span>
-                </div>
-                <div className="claim">
-                  <DbFact />
-                  <span className="txt">
-                    <b>Structured Verification:</b> Interaction verified in database <b>{f.source}</b> (<Sev s={f.severity} />) · Record ID: <code className="mono">{f.source_record_id}</code> · KB: <code>{f.kb_version}</code>
-                  </span>
-                </div>
-                {lang !== "en" && translations[lang]?.[f.id] && (
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      background: "var(--accent-soft)",
-                      borderRadius: "var(--radius)",
-                      marginTop: 8,
-                      border: "1px solid var(--accent)",
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-                      <span className="badge esc" style={{ fontSize: 10 }}>
-                        {lang === "hi" ? "🇮🇳 हिंदी अनुवाद" : "🌴 മലയാളം പരിഭാഷ"} (database record only)
-                      </span>
-                      <span style={{ fontWeight: 700, fontSize: 12 }}>{translations[lang][f.id].severity_translated}</span>
-                    </div>
-                    <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)" }}>
-                      {translations[lang][f.id].db_claim_translated}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-                      Fixed translation of the database record. The English text is the reference.
-                    </div>
-                  </div>
-                )}
-                {claimsFor(f).filter((c) => c.source_type === "RAG_CHUNK").map((c) => (
-                  <div
-                    className="claim"
-                    key={c.claim_id}
-                    style={{
-                      display: "block",
-                      margin: "8px 0",
-                      padding: "10px 14px",
-                      background: "var(--surface)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius)",
-                    }}
-                  >
-                    <div className="row spread" style={{ marginBottom: 4 }}>
-                      <div className="row" style={{ gap: 6 }}>
-                        <AiVerified />
-                        <span style={{ fontWeight: 700, fontSize: 13 }}>{c.text}</span>
-                      </div>
-                      <span className="mono small" style={{ color: "var(--muted)" }}>{c.claim_id}</span>
-                    </div>
-                    {c.chunk && (
-                      <div
-                        style={{
-                          marginTop: 6,
-                          fontSize: 11.5,
-                          background: "var(--accent-soft)",
-                          padding: "8px 12px",
-                          borderRadius: "var(--radius)",
-                          borderLeft: "3px solid var(--accent)",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span>
-                            📄 <b>Verified Source File:</b> {c.chunk.file_name || c.chunk.document} {c.chunk.page != null ? `· Page ${c.chunk.page}` : ""}
-                          </span>
-                          <span className="badge synth" style={{ fontSize: 9.5 }}>Chunk #{c.chunk.chunk_id}</span>
-                        </div>
-                        {c.chunk.section && (
-                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                            <b>Section / Guideline Context:</b> {c.chunk.section}
-                          </div>
-                        )}
-                        {c.support_span && (
-                          <div style={{ marginTop: 6, color: "var(--text)" }}>
-                            🔍 <b>Exact Data Used to Verify:</b>{" "}
-                            <mark style={{ padding: "2px 6px", borderRadius: 3, fontWeight: 600 }}>"{c.support_span}"</mark>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {f.evidence_status === "INSUFFICIENT" && (
-                  <div className="claim">
-                    <Insufficient />
-                    <span className="txt">{f.evidence_message}</span>
-                  </div>
-                )}
-                {f.evidence.slice(0, sel === f.id ? 3 : 1).map((e) => (
-                  <ChunkCard key={e.chunk_id} e={e}
-                    span={claimsFor(f).find((c) => c.chunk?.chunk_id === e.chunk_id)?.support_span} />
-                ))}
-                <ReviewBar f={f} busy={!!busy} onAct={(action, note) =>
-                  run("review", () => api(`/api/v1/reviews/${f.id}`, { body: { action, note } }))} />
-              </div>
-            ))}
-            {rx.duplications.map((d) => (
-              <div key={d.id} className="finding">
-                <div className="row spread">
-                  <span className="pair">Duplicate ingredient: {d.drug}</span>
-                  <Prio p="P2" rule="R8" />
-                </div>
-                <div className="small">{d.item_labels.join(" · ")}</div>
-                <ReviewBar f={{ reviews: d.reviews } as any} busy={!!busy} onAct={(action, note) =>
-                  run("review", () => api(`/api/v1/reviews/${d.id}`, { body: { action, note, target: "duplication" } }))} />
-              </div>
-            ))}
-          </div>
+      {tab === "map" && (
+        <section className="panel">
+          <InteractionMap rx={rx} selected={open} onSelect={showFinding} />
+          <p className="meta" style={{ marginTop: 8 }}>Click a line to open that interaction.</p>
+        </section>
+      )}
+      {tab === "ask" && <section className="panel"><AskPanel rx={rx} /></section>}
+      {tab === "history" && (
+        <div className="stack">
+          <section className="panel"><AuditTrail id={rx.id} refreshKey={auditKey} /></section>
+          <section className="panel"><TechnicalLog rx={rx} refreshKey={auditKey} /></section>
         </div>
+      )}
 
-        <div>
-          <div className="card elevated">
-            <h2><span className="step">2</span>Interaction map</h2>
-            <InteractionMap
-              rx={rx}
-              selected={sel}
-              onSelect={(fid) => {
-                setSel(fid);
-                const el = document.getElementById(`finding-${fid}`);
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "center" });
-                }
-              }}
-            />
-          </div>
-          <div className="card">
-            <h2>Why this priority</h2>
-            <p className="small muted" style={{ marginTop: 0 }}>{rx.priority_notice}</p>
-            <table>
-              <tbody>
-                {rx.rule_hits.map((h, i) => (
-                  <tr key={i}>
-                    <td><Prio p={h.priority} rule={h.rule_id} /></td>
-                    <td className="small">
-                      <b>{h.description}</b>
-                      <div className="muted">input: {h.input}</div>
-                      <div>result: {h.result}</div>
-                    </td>
-                  </tr>
-                ))}
-                {rx.rule_hits.length === 0 && <tr><td className="muted small">No rule fired: CLEAR.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-          <div className="card">
-            <h2>Escalations</h2>
-            {rx.escalations.length === 0 && <span className="muted small">None</span>}
-            {rx.escalations.map((e) => (
-              <div key={e.id} className="row small" style={{ padding: "4px 0" }}>
-                <Escalation code={e.reason_code} />
-                <span className="mono">{e.trigger_rule_id}</span>
-                <span>{e.detail}</span>
-              </div>
-            ))}
-          </div>
-          <AskPanel rx={rx} />
-          <AuditTrail id={rx.id} refreshKey={auditKey} />
-          <StepsCard id={rx.id} refreshKey={auditKey} />
-        </div>
-      </div>
       {prove && <ProveWhy findingId={prove} onClose={() => setProve(null)} />}
-    </>
+    </div>
   );
 }
 
-function Resolution({ rx, onConfirm }: { rx: Prescription; onConfirm: (i: Item, drugId: number | null) => void }) {
+function FindingCard({ f, claims, busy, explaining, hasExplanation, tr, lang, onProve, onAct, onCollapse }: {
+  f: Finding; claims: Claim[]; busy: boolean; explaining: boolean; hasExplanation: boolean; tr?: any; lang: Lang;
+  onProve: () => void; onAct: (action: string, note: string) => void; onCollapse?: () => void;
+}) {
+  const source = f.source === "DDInter" ? "the DDInter interaction database" : "your hospital's uploaded interaction list";
   return (
-    <div className="card">
-      <h2><span className="step">1</span>Resolution</h2>
-      <table>
-        <thead>
-          <tr><th>Line</th><th>As written</th><th>Resolved molecule</th><th>Method</th></tr>
-        </thead>
-        <tbody>
-          {rx.items.map((i) => (
-            <tr key={i.id}>
-              <td className="mono">{i.line_no}</td>
-              <td className="small">{i.raw_span}</td>
-              <td>
-                {i.drug ? (
-                  <>
-                    <b>{i.drug}</b>
-                    {i.product && <div className="small">via {i.product} {i.is_synthetic && <Synthetic />}</div>}
-                    {i.nlem_listed && <div className="small muted">NLEM 2022 listed</div>}
-                  </>
-                ) : i.method === "pharmacist" ? (
-                  <span className="muted small">{i.matched_text}</span>
-                ) : (
-                  <ConfirmItem item={i} onConfirm={onConfirm} />
+    <article id={`finding-${f.id}`} className={`fcard sev-edge-${f.severity}`}>
+      <div className="fcard-head">
+        <h3>{f.drug_a} <span className="plus">+</span> {f.drug_b}</h3>
+        <Sev s={f.severity} />
+        {onCollapse && (
+          <button type="button" className="icon-btn" aria-label="Collapse" onClick={onCollapse}>
+            <Icon name="x" size={16} />
+          </button>
+        )}
+      </div>
+
+      <p className="fact">
+        Recorded as a <b>{f.severity === "Unknown" ? "unknown-severity" : f.severity}</b> interaction in {source}.
+      </p>
+      {tr && (
+        <div className="tr-block" lang={lang}>
+          <div className="tr-text">{tr.db_claim_translated}</div>
+          <div className="tr-note">Fixed translation of the database record. The English text is the reference.</div>
+        </div>
+      )}
+
+      <div className="guideline">
+        <div className="guideline-h">
+          <span>What the guidelines say</span>
+          {claims.length > 0 && <span className="tag tag-brand" title="Written by AI, then checked against the quoted source">AI summary · verified</span>}
+        </div>
+        {explaining && !hasExplanation ? (
+          <p className="ev-loading"><Spinner /> Looking up guideline evidence…</p>
+        ) : claims.length > 0 ? (
+          <ul className="plain-list">
+            {claims.map((c) => (
+              <li key={c.claim_id}>
+                {c.text}
+                {c.chunk && (
+                  <details className="source">
+                    <summary>{c.chunk.document}{c.chunk.page != null ? `, page ${c.chunk.page}` : ""}</summary>
+                    <blockquote><Highlight text={c.chunk.text} span={c.support_span} /></blockquote>
+                  </details>
                 )}
-              </td>
-              <td className="small">
-                {i.method}
-                {i.confidence != null && i.method !== "exact" ? ` · ${i.confidence}` : ""}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="small muted" style={{ marginBottom: 0 }}>{rx.lines_ignored} non-medication line(s) ignored.</p>
+              </li>
+            ))}
+          </ul>
+        ) : f.evidence.length > 0 ? (
+          <ul className="plain-list">
+            {f.evidence.slice(0, 2).map((e) => (
+              <li key={e.chunk_id}>
+                <details className="source">
+                  <summary>Related passage: {e.document}{e.page != null ? `, page ${e.page}` : ""}</summary>
+                  <blockquote><Highlight text={e.text} span={e.support_span} /></blockquote>
+                </details>
+              </li>
+            ))}
+          </ul>
+        ) : hasExplanation || f.evidence_status === "INSUFFICIENT" ? (
+          <p className="muted">No supporting guideline text found for this pair. Use your professional judgement.</p>
+        ) : (
+          <p className="muted">Not looked up yet.</p>
+        )}
+      </div>
+
+      <ActionBar reviews={f.reviews} busy={busy} onAct={onAct} />
+      <button type="button" className="linkish sm how" onClick={onProve}>How was this found?</button>
+    </article>
+  );
+}
+
+function ActionBar({ reviews, busy, onAct }: { reviews: Review[]; busy: boolean; onAct: (action: string, note: string) => void }) {
+  const [note, setNote] = useState("");
+  const [more, setMore] = useState(false);
+  const [again, setAgain] = useState(false);
+  const last = reviews[reviews.length - 1];
+  const act = (a: string) => {
+    onAct(a, note.trim());
+    setNote("");
+    setMore(false);
+    setAgain(false);
+  };
+  return (
+    <div className="actions">
+      {reviews.map((r) => (
+        <p key={r.id} className="done-line">
+          <Icon name="check" size={15} />
+          <span>
+            <b>{DONE_LABEL[r.action] ?? r.action}</b> by {r.user}
+            {r.note && <> · “{r.note}”</>}
+            {r.stale && <span className="warn-text"> · the knowledge base has changed since</span>}
+          </span>
+        </p>
+      ))}
+      {last && !again ? (
+        <button type="button" className="linkish sm" onClick={() => setAgain(true)}>Change or add an action</button>
+      ) : (
+        <>
+          <div className="row">
+            <button className="btn sm primary-soft" disabled={busy} onClick={() => act("ACKNOWLEDGE")}>
+              <Icon name="check" size={15} /> Acknowledge
+            </button>
+            <button className="btn sm danger-soft" disabled={busy} onClick={() => act("ESCALATE")}>
+              <Icon name="flag" size={15} /> Escalate to prescriber
+            </button>
+            <button className="btn sm ghost" onClick={() => setMore((m) => !m)} aria-expanded={more}>
+              More <Icon name="chevron" size={14} />
+            </button>
+          </div>
+          {more && (
+            <div className="more-actions">
+              <div className="row">
+                <button className="btn sm ghost" disabled={busy} onClick={() => act("REQUEST_MORE_EVIDENCE")}>
+                  <Icon name="book" size={15} /> Need more evidence
+                </button>
+                <button className="btn sm ghost" disabled={busy} onClick={() => act("MARK_FOR_FOLLOW_UP")}>
+                  <Icon name="clock" size={15} /> Follow up later
+                </button>
+              </div>
+              <input type="text" placeholder="Note saved with your next action (optional)" aria-label="Note"
+                value={note} onChange={(e) => setNote(e.target.value)} />
+            </div>
+          )}
+        </>
+      )}
     </div>
+  );
+}
+
+function MedRow({ n, i, onConfirm }: { n: number; i: Item; onConfirm: (i: Item, drugId: number | null) => void }) {
+  if (!i.drug_id && i.method !== "pharmacist")
+    return (
+      <li className="med-row med-row-open">
+        <span className="med-n">{n}</span>
+        <ConfirmItem item={i} onConfirm={onConfirm} />
+      </li>
+    );
+  return (
+    <li className="med-row">
+      <span className="med-n">{n}</span>
+      <div className="med-main">
+        <div className="med-name">
+          {i.drug ?? i.matched_text}
+          {i.nlem_listed && <span className="tag tag-brand" title="National List of Essential Medicines 2022">NLEM</span>}
+          {i.is_synthetic && <Synthetic />}
+        </div>
+        <div className="meta">
+          {i.method === "pharmacist" ? "Confirmed by you as not in the database" : <>Written as “{i.raw_span.replace(/^\s*\d+[.)]\s*/, "")}”</>}
+          {i.product && ` · brand ${i.product}`}
+        </div>
+        {i.method === "fuzzy" && <div className="warn-text small">Read as {i.drug} from a misspelling. Please check.</div>}
+      </div>
+    </li>
   );
 }
 
@@ -404,67 +462,48 @@ function ConfirmItem({ item, onConfirm }: { item: Item; onConfirm: (i: Item, dru
     return () => clearTimeout(t);
   }, [q]);
   return (
-    <div>
-      <Unresolved /> <span className="small">Pharmacist confirmation required</span>
-      <div className="row" style={{ marginTop: 4 }}>
-        <input type="text" placeholder="Search molecule…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 170 }} />
-        <button className="btn sm" onClick={() => onConfirm(item, null)}>Not in database</button>
-      </div>
-      {res.slice(0, 5).map((c) => (
-        <div key={c.drug_id} className="row small" style={{ marginTop: 3 }}>
-          <button className="btn sm" onClick={() => onConfirm(item, c.drug_id)}>Confirm</button>
-          {c.name} <span className="muted">({c.score})</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ReviewBar({ f, busy, onAct }: { f: Pick<Finding, "reviews">; busy: boolean; onAct: (a: string, note: string) => void }) {
-  const [note, setNote] = useState("");
-  return (
-    <div style={{ marginTop: 8, borderTop: "1px dashed var(--border)", paddingTop: 8 }} onClick={(e) => e.stopPropagation()}>
-      {f.reviews.map((r) => (
-        <div key={r.id} className="small">
-          <b>{r.action.replace(/_/g, " ").toLowerCase()}</b> by {r.user} · reviewed against KB {r.kb_version_seen}
-          {r.stale && <span style={{ color: "var(--p2)" }}> (current KB differs)</span>}
-          {r.note && <> · “{r.note}”</>}
-        </div>
-      ))}
-      <div className="row" style={{ marginTop: 4 }}>
-        <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ flex: 1, minWidth: 140 }} />
-        {ACTIONS.map((a) => (
-          <button key={a} className={`btn sm ${a === "ESCALATE" ? "danger" : ""}`} disabled={busy}
-            onClick={() => { onAct(a, note); setNote(""); }}>
-            {a.replace(/_/g, " ").toLowerCase()}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StepsCard({ id, refreshKey }: { id: number; refreshKey: number }) {
-  const [steps, setSteps] = useState<{ id: number; graph: string; node: string; status: string; latency_ms: number; summary: string }[]>([]);
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (open) api(`/api/v1/prescriptions/${id}/steps`).then((r) => setSteps(r.steps));
-  }, [id, open, refreshKey]);
-  return (
-    <div className="card">
-      <h2>
-        Agent steps (LangGraph state per node){" "}
-        <button className="btn sm" onClick={() => setOpen(!open)}>{open ? "hide" : "show"}</button>
-      </h2>
-      {open && (
-        <div className="trace">
-          {steps.map((s) => (
-            <div key={s.id}>
-              [{s.graph}] {s.node} · {s.status} · {s.latency_ms} ms — {s.summary}
-            </div>
+    <div className="med-main confirm-box">
+      <div className="med-name">“{item.raw_span.replace(/^\s*\d+[.)]\s*/, "")}”</div>
+      <p className="warn-text small">Not recognised. Which medicine is it?</p>
+      {res.length > 0 && (
+        <div className="cands">
+          {res.slice(0, 5).map((c) => (
+            <button key={c.drug_id} type="button" className="chip" onClick={() => onConfirm(item, c.drug_id)}>{c.name}</button>
           ))}
         </div>
       )}
+      <div className="row">
+        <input type="text" placeholder="Search for the medicine" aria-label="Search for the medicine" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 260 }} />
+        <button type="button" className="linkish sm" onClick={() => onConfirm(item, null)}>It is not in the database</button>
+      </div>
     </div>
+  );
+}
+
+function TechnicalLog({ rx, refreshKey }: { rx: Prescription; refreshKey: number }) {
+  const [steps, setSteps] = useState<{ id: number; graph: string; node: string; status: string; latency_ms: number; summary: string }[]>([]);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (opened) api(`/api/v1/prescriptions/${rx.id}/steps`).then((r) => setSteps(r.steps));
+  }, [rx.id, opened, refreshKey]);
+  return (
+    <details className="more" onToggle={(e) => setOpened((e.target as HTMLDetailsElement).open)}>
+      <summary>Technical details</summary>
+      <dl className="kv" style={{ marginTop: 10 }}>
+        <dt>Priority rules</dt>
+        <dd>{rx.rule_hits.map((h) => `${h.rule_id}: ${h.description}`).join(" · ") || "none fired"}</dd>
+        <dt>Knowledge base</dt><dd>{rx.kb_version}{rx.current_kb_version !== rx.kb_version && ` (current ${rx.current_kb_version})`}</dd>
+        <dt>Request ID</dt><dd className="code">{rx.correlation_id}</dd>
+        <dt>LLM use for the check</dt><dd>{rx.llm_tokens_check.input + rx.llm_tokens_check.output} tokens</dd>
+        {rx.llm_usage && <><dt>LLM use for evidence</dt><dd>{rx.llm_usage.calls} call(s), {rx.llm_usage.input_tokens} in / {rx.llm_usage.output_tokens} out</dd></>}
+        <dt>Safety flags</dt><dd>{rx.escalations.map((e) => e.reason_code).join(", ") || "none"}</dd>
+      </dl>
+      {steps.length > 0 && (
+        <div className="trace" style={{ marginTop: 10 }}>
+          {steps.map((s) => <div key={s.id}>[{s.graph}] {s.node} · {s.status} · {s.latency_ms} ms — {s.summary}</div>)}
+        </div>
+      )}
+    </details>
   );
 }

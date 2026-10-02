@@ -29,8 +29,8 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
 
   const ids = [...drugs.keys()];
   const n = ids.length + unresolved.length;
-  const W = 580,
-    H = 360,
+  const W = 440,
+    H = 400,
     cx = W / 2,
     cy = H / 2,
     R = Math.min(W, H) / 2 - 62;
@@ -46,22 +46,12 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
 
   return (
     <div className="map card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 14 }}>
-          <span>🌐</span> Interaction Topology Map
-        </h2>
-        <div style={{ display: "flex", gap: 6, fontSize: 11.5 }}>
-          {majorCount > 0 && (
-            <span className="badge esc" style={{ padding: "2px 6px" }}>
-              {majorCount} Major
-            </span>
-          )}
-          {moderateCount > 0 && (
-            <span className="badge degraded" style={{ padding: "2px 6px" }}>
-              {moderateCount} Moderate
-            </span>
-          )}
-          <span className="small muted">
+      <div className="map-head">
+        <h2 style={{ margin: 0 }}>Interaction map</h2>
+        <div className="row" style={{ gap: 6 }}>
+          {majorCount > 0 && <span className="pill sev-Major">{majorCount} Major</span>}
+          {moderateCount > 0 && <span className="pill sev-Moderate">{moderateCount} Moderate</span>}
+          <span className="meta">
             {ids.length} drugs · {rx.findings.length} pairs
           </span>
         </div>
@@ -70,10 +60,10 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Prescription interaction map">
         <defs>
           <filter id="glow-rose" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#f43f5e" floodOpacity="0.6" />
+            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#b42318" floodOpacity="0.45" />
           </filter>
           <filter id="glow-blue" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#3b82f6" floodOpacity="0.5" />
+            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#0b7a5e" floodOpacity="0.45" />
           </filter>
         </defs>
 
@@ -115,8 +105,7 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
           const mx = (x1 + x2) / 2,
             my = (y1 + y2) / 2;
           const sel = selected === f.id;
-          const ev = f.evidence_status === "FOUND" ? "✓ev" : f.evidence_status === "INSUFFICIENT" ? "no ev" : "";
-          const isMajor = f.severity === "Major";
+                    const isMajor = f.severity === "Major";
 
           return (
             <g
@@ -157,7 +146,7 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
                 fontWeight={700}
                 letterSpacing="0.02em"
               >
-                #{f.ordinal} {f.severity} {ev}
+                {f.ordinal} · {f.severity}
                 {f.review_status !== "pending" ? " ●" : ""}
               </text>
             </g>
@@ -230,7 +219,7 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
                 fill={hub ? "var(--accent)" : "var(--muted)"}
                 fontWeight={800}
               >
-                {hub ? "HUB" : dup ? "×2" : `${degree.get(id) ?? 0} int`}
+                {dup ? "×2" : degree.get(id) ?? 0}
               </text>
             </g>
           );
@@ -265,24 +254,24 @@ export default function InteractionMap({ rx, selected, onSelect }: Props) {
 
       <div className="legend">
         <span>
-          <b style={{ color: "var(--p1)" }}>━</b> Major (Contraindicated)
+          <b style={{ color: "var(--p1)" }}>━</b> Major
         </span>
         <span>
-          <b style={{ color: "var(--p2)" }}>━</b> Moderate (Monitor)
+          <b style={{ color: "var(--p2)" }}>━</b> Moderate
         </span>
         <span>
           <b style={{ color: "var(--muted)" }}>┅</b> Minor / Unknown
         </span>
         <span>
-          <b style={{ color: "var(--accent)" }}>◯</b> Hub (≥2 interactions)
+          <b style={{ color: "var(--accent)" }}>◯</b> In 2+ interactions (number = interactions)
         </span>
         <span>
-          <b style={{ color: "var(--synth)" }}>◌</b> Duplicate Active Ingredient
+          <b style={{ color: "var(--synth)" }}>◌</b> Same ingredient twice
         </span>
         <span>
-          <b style={{ color: "var(--insuff)" }}>?</b> Unresolved Molecule
+          <b style={{ color: "var(--insuff)" }}>?</b> Not recognised
         </span>
-        <span>● Reviewed by Pharmacist</span>
+        <span>● Reviewed by pharmacist</span>
       </div>
       <p className="small muted" style={{ margin: "8px 0 0" }}>
         {rx.pairwise_notice}
