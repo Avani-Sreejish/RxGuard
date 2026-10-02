@@ -165,14 +165,33 @@ def _check_tokens(p):
             "calls": LlmCall.objects.filter(correlation_id=p.correlation_id).exclude(model="(simulated)").count()}
 
 
-def queue_row(p: Prescription):
-    return {"id": p.id, "status": p.status, "priority": p.priority, "created_at": p.created_at.isoformat(),
-            "interaction_count": p.findings.count(),
-            "unresolved_count": p.items.filter(drug__isnull=True).exclude(method="pharmacist").count(),
-            "escalation_count": p.escalations.count(),
-            "reviewed_count": p.findings.exclude(review_status="pending").count(),
-            "injection_flag": p.injection_flag, "kb_version": p.kb_version.label,
-            "first_line": (p.raw_text.strip().splitlines() or [""])[0][:80]}
+def queue_rows(prescriptions: list[Prescription]) -> list[dict]:
+    """Queue rows with a fixed number of grouped queries (one count query per row made the queue take seconds)."""
+    from django.db.models import Count, Q
+
+    from api.models import PrescriptionItem
+
+    ids = [p.id for p in prescriptions]
+
+    def counts(model, filt=Q()):
+        return dict(model.objects.filter(filt, prescription_id__in=ids).values_list("prescription_id")
+                    .annotate(n=Count("id")).values_list("prescription_id", "n"))
+
+    findings = counts(InteractionFinding)
+    reviewed = counts(InteractionFinding, ~Q(review_status="pending"))
+    unresolved = counts(PrescriptionItem, Q(drug__isnull=True) & ~Q(method="pharmacist"))
+    escalations = counts(Escalation)
+    medicines: dict[int, list[str]] = {}
+    for pid, name in (PrescriptionItem.objects.filter(prescription_id__in=ids, drug__isnull=False)
+                      .order_by("line_no", "id").values_list("prescription_id", "drug__generic_name")):
+        if name not in medicines.setdefault(pid, []):
+            medicines[pid].append(name)
+    return [{"id": p.id, "status": p.status, "priority": p.priority, "created_at": p.created_at.isoformat(),
+             "interaction_count": findings.get(p.id, 0), "unresolved_count": unresolved.get(p.id, 0),
+             "escalation_count": escalations.get(p.id, 0), "reviewed_count": reviewed.get(p.id, 0),
+             "injection_flag": p.injection_flag, "kb_version": p.kb_version.label,
+             "first_line": (p.raw_text.strip().splitlines() or [""])[0][:80],
+             "medicines": medicines.get(p.id, [])} for p in prescriptions]
 
 
 def audit_rows(p: Prescription, page: int, size: int):

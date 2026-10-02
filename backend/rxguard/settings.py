@@ -96,6 +96,7 @@ else:
             "PORT": env("MYSQL_PORT", "3306"),
             "OPTIONS": {"charset": "utf8mb4", "connect_timeout": 2},
             "CONN_MAX_AGE": 60,
+            "CONN_HEALTH_CHECKS": True,  # ping a reused connection before its first query
         }
     }
 

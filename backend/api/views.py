@@ -1,9 +1,7 @@
 """REST endpoints (spec section 18.3). All requests and AI outputs are validated with Pydantic."""
 from __future__ import annotations
 
-import csv
 import statistics
-import threading
 from decimal import Decimal
 
 from django.conf import settings
@@ -33,7 +31,7 @@ from engine.schemas import (AskInput, ConfirmItemInput, EscalationRequest, Expla
 from engine.tools import escalate as tool3
 from engine.tools import interaction_lookup
 from engine.tools.base import run_tool
-from kbload import uploads
+from kbload import ddinter_files, uploads
 
 
 class RxView(APIView):
@@ -208,7 +206,7 @@ class PrescriptionList(RxView):
     def get(self, request):
         from engine.triage import RANK
         qs = Prescription.objects.select_related("kb_version").order_by("-id")[:200]
-        rows = [S.queue_row(p) for p in qs]
+        rows = S.queue_rows(list(qs))
         open_first = {"AWAITING_PHARMACIST": 0, "IN_REVIEW": 1, "CHECKED": 2, "REVIEWED": 3, "CLEAR": 4}
         rows.sort(key=lambda r: (open_first.get(r["status"], 5), RANK.get(r["priority"], 9), -r["id"]))
         return Response({"results": rows})
@@ -243,35 +241,11 @@ class ConfirmItem(RxView):
         return Response(S.prescription_dict(p))
 
 
-_DDINTER_FILES: dict[str, list[str]] | None = None
-_DDINTER_LOCK = threading.Lock()
-
-
-def _ddinter_files(record_id: str) -> list[str]:
-    """DDInter category CSVs that contain this record (ordered DDInter-ID pair, e.g. 'DDInter1951|DDInter20').
-    The raw files are read once per process; a pair can appear in several ATC category files."""
-    global _DDINTER_FILES
-    with _DDINTER_LOCK:
-        if _DDINTER_FILES is None:
-            found: dict[str, list[str]] = {}
-            raw_dir = settings.REPO_ROOT / "data" / "raw" / "ddinter"
-            for path in sorted(raw_dir.glob("ddinter_downloads_code_*.csv")):
-                with open(path, encoding="utf-8", errors="replace", newline="") as fp:
-                    for row in csv.DictReader(fp):
-                        a, b = row.get("DDInterID_A"), row.get("DDInterID_B")
-                        if a and b:
-                            files = found.setdefault("|".join(sorted((a, b))), [])
-                            if path.name not in files:
-                                files.append(path.name)
-            _DDINTER_FILES = found
-    return _DDINTER_FILES.get(record_id, [])
-
-
 def _source_file(i) -> tuple[str, list[dict]]:
     """(file the interaction row came from, its data_sources rows) for Prove Why."""
     fields = ("name", "version", "license", "url", "retrieved_at", "checksum")
     if interaction_lookup.source_label(i.source) == "DDInter":
-        files = _ddinter_files(i.source_record_id)
+        files = ddinter_files.files_for(i.source_record_id)
         name = ", ".join(files) if files else "raw file not available on this server"
         return f"{name} (DDInter 1.0)", list(DataSource.objects.filter(
             kb_version=i.kb_version, name__icontains="DDInter").values(*fields))

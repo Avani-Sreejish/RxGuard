@@ -31,6 +31,9 @@ def _summ(obj, n=400) -> str:
 
 def _in_thread(fn, ctx, *args, **kwargs):
     token = context.set_context(ctx)
+    # Pool threads keep their own DB connection between requests. Check it before use too: after a long idle
+    # period MySQL has dropped it ("server has gone away") although it was fresh when the last task finished.
+    close_old_connections()
     try:
         return fn(*args, **kwargs)
     finally:
