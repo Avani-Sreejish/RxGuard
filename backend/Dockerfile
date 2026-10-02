@@ -32,5 +32,5 @@ COPY eval /app/eval
 RUN useradd -m rx && mkdir -p /app/data/index /app/data/processed /app/data/raw && chown -R rx /app/data
 USER rx
 EXPOSE 8000
-HEALTHCHECK --interval=15s --timeout=3s --start-period=90s CMD curl -fs http://127.0.0.1:8000/healthz || exit 1
+HEALTHCHECK --interval=15s --timeout=3s --start-period=300s CMD curl -fs http://127.0.0.1:8000/healthz || exit 1
 CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn rxguard.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-1} --threads ${GUNICORN_THREADS:-8} --timeout 30 --access-logfile -"]
