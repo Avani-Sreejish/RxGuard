@@ -13,8 +13,13 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu --extra-i
 # Bake the embedding model into the image so the container never downloads at request time
 ARG EMBEDDING_MODEL=intfloat/multilingual-e5-base
 ARG RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')" \
-    && python -c "from sentence_transformers import CrossEncoder; CrossEncoder('${RERANK_MODEL}')"
+# (retried: a dropped connection to the model CDN should not fail the whole image build)
+RUN for i in 1 2 3; do \
+        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')" \
+        && python -c "from sentence_transformers import CrossEncoder; CrossEncoder('${RERANK_MODEL}')" \
+        && ok=1 && break; \
+        echo "model download failed (attempt $i), retrying"; sleep 10; \
+    done; [ "$ok" = 1 ]
 # The model is baked in: never contact the Hub at runtime
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 OMP_NUM_THREADS=4
 COPY backend/ /app/backend/

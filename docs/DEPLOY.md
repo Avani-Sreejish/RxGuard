@@ -12,6 +12,22 @@ One server runs everything with Docker Compose: **web** (Django + gunicorn), **m
 - Inbound ports **80 and 443** open in the cloud firewall / security group (port 22 for SSH).
 - A Gemini API key (optional: without it RxGuard runs in template mode and every flag still appears).
 
+## 0. Azure for Students: create the VM (portal, about 5 minutes)
+
+1. [portal.azure.com](https://portal.azure.com) → **Virtual machines** → **Create** → **Azure virtual machine**.
+2. Resource group `rxguard-rg` (create new) · name `rxguard-vm` · region close to the judges (e.g. *Central India*) ·
+   image **Ubuntu Server 24.04 LTS - x64 Gen2** · size **Standard_B2s** (2 vCPU, 4 GiB; not B1s, it runs out of memory) ·
+   authentication **SSH public key** (download the `.pem` key it generates) or a password · username `azureuser`.
+3. **Inbound ports:** allow **SSH (22), HTTP (80), HTTPS (443)**.
+4. **Disks:** OS disk 30 GiB or more (the default is fine). **Review + create** → **Create**.
+5. Open the VM → **Overview** → **DNS name: Not configured** → set a label such as `rxguard-phc` → **Save**.
+   Your domain is now `rxguard-phc.<region>.cloudapp.azure.com` (use it as `DOMAIN` below; Caddy gets the HTTPS
+   certificate for it automatically).
+6. Optional: **Auto-shutdown** at night while developing; switch it off before judging.
+7. Connect: `ssh -i <downloaded-key>.pem azureuser@<public-ip>` (Windows PowerShell has `ssh` built in).
+
+On a 4 GB VM set `GUNICORN_WORKERS=1` in `.env`: every gunicorn worker loads its own copy of the embedding model.
+
 ## 1. Install Docker (once)
 
 ```bash
@@ -48,6 +64,9 @@ Set at least:
 | `GEMINI_API_KEY` | your key (optional) |
 | `HTTP_PORT` | `127.0.0.1:8080` so nginx is reachable only through Caddy |
 | `DEMO_TOGGLES_ENABLED` | `0` |
+| `GUNICORN_WORKERS` | `1` on a 4 GB VM, `2` with 8 GB or more |
+
+Keep the `LLM_*` model lines from `.env.example`: the evaluation and latency numbers were measured with them.
 
 > **Demo login:** the sign-in page pre-fills `pharmacist` / `rxguard-demo` so judges can sign in with one click.
 > That only works if `DEMO_PHARMACIST_PASSWORD=rxguard-demo`, and it means **anyone who finds the URL can sign in**.
